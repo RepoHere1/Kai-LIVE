@@ -53,7 +53,7 @@ function defaultState() {
   const start = Number(ENV.DRY_START_BALANCE || 300);
   const allNoStart = 250;
   return {
-    mode: 'dry',
+    mode: 'live',  // LIVE server: start in LIVE mode
     no_lanes_enabled: true,
     dry: { starting_balance: start, baseline: start, positions: [], closed: [], real_started: true },
     all_no: {
@@ -1136,7 +1136,7 @@ async function handle(req, res) {
   // --- health / settings
   if (p === '/api/health') {
     return json(res, {
-      ok: true, mode: 'dry', uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
+      ok: true, mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
       hosts: { kalshi_live: kalshi.LIVE_BASE, kalshi_demo: kalshi.DEMO_BASE, spot: 'api.exchange.coinbase.com', llm: ENV.KILO_BASE_URL },
       credentials: { live_key: kalshi.accounts.live.keyId, demo_key: kalshi.accounts.demo.keyId, llm_token: (ENV.KILO_TOKEN || '').slice(0, 12) + '...' },
       dry_balance: liveCash(),
