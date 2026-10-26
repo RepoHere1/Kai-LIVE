@@ -1,0 +1,15 @@
+Flask==3.0.3
+Flask-SocketIO==1.0.0
+Flask-CORS==4.0.0
+Kalshi==1.0.0
+Kilo==1.0.0
+pandas==2.2.2
+numpy==1.26.18
+werkzeug==3.0.3
+itsdangerous==2.2.0
+Jinja2==3.2.0
+Werkzeug==3.0.3
+click==8.1.0
+markupsafe==2.1.5
+python-dateutil==2.8.2
+six==1.16.0

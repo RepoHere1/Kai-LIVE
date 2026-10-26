@@ -1,0 +1,2868 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kalshi-Frigo - LIVE Trading Dashboard</title>
+<!-- Favicon is green for both books (LIVE and DRY share the clean palette). The
+     letter still distinguishes L vs D. -->
+<link rel="icon" id="favicon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22&gt;&lt;rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%232ee6a8%22/&gt;&lt;text x=%2216%22 y=%2223%22 font-size=%2219%22 font-weight=%22bold%22 text-anchor=%22middle%22 fill=%22%23000%22&gt;D&lt;/text&gt;&lt;/svg&gt;">
+<style>
+:root{
+  --bg:#080b12; --panel:#0f1420; --panel2:#141b2a; --line:#1f2937; --line2:#2b3648;
+  --fg:#e6edf6; --dim:#b8cce0; --faint:#5b6a80;
+  --up:#2ee6a8; --down:#a10000; --live:#8a0303; --live-bg:rgba(138,3,3,.20); --blue:#4d9fff; --amber:#ffb454; --violet:#a78bfa;
+  --blood:#a10000;  /* the LIVE-mode warning red: button word + flag border */
+  --r:14px; --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scrollbar-color:#2b3648 transparent}
+body{
+  font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;
+  background:
+    radial-gradient(1100px 520px at 12% -10%, #16233c 0%, transparent 60%),
+    radial-gradient(900px 480px at 92% 0%, #1a1533 0%, transparent 55%),
+    var(--bg);
+  color:var(--fg); min-height:100vh; padding:22px 18px 48px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1400px;margin:0 auto}
+
+/* ---------- header ----------
+   ONE row, left to right: logo + wordmark | mode flag + DRY/LIVE | host | stamp.
+   The stamp is pushed hard right with margin-left:auto so it stays the last
+   thing on the line even when the middle cells resize. The mode control sits
+   immediately right of the wordmark rather than in its own stacked column, so
+   the name, the current state and the control that changes it read as one
+   unit. */
+header{
+  display:flex;flex-wrap:nowrap;align-items:center;gap:18px;
+  margin-bottom:22px;min-width:0;
+}
+.brand{display:flex;align-items:center;gap:12px;min-width:0;flex:0 1 auto}
+.brandtext{min-width:0}
+.logo{
+  width:42px;height:42px;border-radius:12px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(160deg,#1c0707,#0c0303 70%);
+  border:1px solid rgba(255,59,31,.35);
+  box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(161,0,0,.35), inset 0 0 14px rgba(161,0,0,.22);
+}
+h1{font-size:20px;font-weight:650;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+h1 span{color:var(--dim);font-weight:400}
+.sub{color:var(--faint);font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Flag and switch on one row, flag to the left of the buttons. */
+.moderow{display:flex;align-items:center;gap:10px;flex:none}
+.hostcell{flex:none;min-width:0}
+.stamp{margin-left:auto;flex:none;font-size:11px;color:var(--faint);white-space:nowrap}
+
+/* Narrow viewports cannot hold seven things on one line without truncating the
+   mode control, which is the one element that must stay fully readable. Below
+   this width the header is allowed to wrap, but it wraps into rows rather than
+   columns so the wordmark keeps its content. */
+@media (max-width:1180px){
+  header{flex-wrap:wrap;row-gap:12px}
+  .stamp{margin-left:0}
+}
+
+/* DRY / LIVE switch - the highest-stakes control on the page, so it is the
+   most prominent thing in the header and colour-coded rather than subtle. */
+.modeswitch{display:flex;gap:0;border-radius:10px;overflow:hidden;border:1px solid var(--line2)}
+.modebtn{
+  background:var(--panel);color:var(--faint);border:0;border-radius:0;
+  padding:7px 18px;font-size:12px;font-weight:700;letter-spacing:.09em;cursor:pointer;
+}
+.modebtn:hover{background:rgba(255,255,255,.07)}
+.modebtn.on{background:rgba(46,230,168,.16);color:var(--up);box-shadow:inset 0 -2px 0 var(--up)}
+/* OPERATOR ORDER: when LIVE is the active book the button's word is BLOOD
+   RED - the same alarm the flag carries - not the shared green. */
+.modebtn.live.on{background:rgba(161,0,0,.20);color:var(--blood);box-shadow:inset 0 -2px 0 var(--blood);text-shadow:0 0 10px rgba(161,0,0,.55)}
+.modebtn:disabled{opacity:.5;cursor:not-allowed}
+/* ALL NO is a link, not a button, so it needs to inherit the SAME box: same
+   padding, weight, tracking and radius-matched ends, or it reads as a stray
+   link that happens to be parked next to the mode switch. */
+a.modebtn{display:inline-flex;align-items:center;text-decoration:none;line-height:normal}
+.modebtn.allno{color:var(--blue);font-weight:800}
+.modebtn.allno:hover{background:rgba(56,132,255,.14)}
+/* NO LANES toggle - black by default, turns YELLOW when ON. Same box as the
+   mode buttons so it reads as part of the control group. */
+.modebtn.nolanes{color:var(--fg)}
+.modebtn.nolanes.on{background:rgba(255,215,0,.22);color:#FFD700;box-shadow:inset 0 -2px 0 #FFD700}
+.modebtn.nolanes:hover{background:rgba(255,255,255,.07)}
+
+/* ---------- Mode is a whole-page state, not a badge you have to find ----------
+   LIVE and DRY now share the same clean green palette (DRY was the visually
+   superior read). The difference is the frame: DRY gets the green frame, LIVE
+   gets a thin red frame around EVERY card so real-money is unmistakable without
+   tinting the whole page red. */
+body::before{
+  content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;
+  border:5px solid var(--mode-color, var(--up));
+  box-shadow:inset 0 0 22px var(--mode-glow, rgba(46,230,168,.30));
+  transition:border-color .18s ease, box-shadow .18s ease;
+}
+body[data-mode="dry"]{--mode-color:var(--up);--mode-glow:rgba(46,230,168,.32)}
+body[data-mode="live"]{--mode-color:var(--down);--mode-glow:rgba(161,0,0,.32)}
+/* Green border on every card when DRY - simulated money, clean frame */
+body[data-mode="dry"] .card{border:1px solid var(--up)}
+body[data-mode="dry"] .card:hover{border-color:var(--up)}
+body[data-mode="dry"] .tile{border:1px solid var(--up)}
+/* Red border on every card when LIVE - real money is leaving the account. */
+body[data-mode="live"] .card{border:1px solid var(--down)}
+body[data-mode="live"] .card:hover{border-color:var(--down)}
+body[data-mode="live"] .tile{border:1px solid var(--down)}
+/* The logo keeps its subtle red accent (it is the brand), shared by both books. */
+body[data-mode="live"] .brand .logo{border-color:rgba(77,159,255,.4);box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(43,108,255,.35)}
+body[data-mode="dry"]  .brand .logo{border-color:rgba(77,159,255,.4);box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(43,108,255,.35)}
+
+.modeflag{
+  position:relative;
+  display:inline-flex;align-items:center;gap:9px;
+  font-size:14px;font-weight:900;letter-spacing:.10em;
+  padding:6px 15px;border-radius:10px;border:2px solid currentColor;
+  box-shadow:0 0 0 1px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.35);
+}
+.modeflag.dry{color:var(--up);background:rgba(46,230,168,.12)}
+.modeflag.dry {color:var(--up);background:rgba(46,230,168,.10)}
+/* OPERATOR ORDER: the LIVE MODE flag goes blood red with a red border when
+   the book is LIVE - text, border and glow all in the alarm colour. */
+.modeflag.live{color:var(--blood);background:rgba(161,0,0,.16);border-color:var(--blood);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 4px 14px rgba(161,0,0,.45)}
+.modeflag .dot{width:9px;height:9px}
+.orbitring{display:none}
+.url{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--blue);
+  background:rgba(77,159,255,.09);border:1px solid rgba(77,159,255,.25);
+  padding:3px 9px;border-radius:7px;cursor:pointer;transition:.15s;
+}
+.url:hover{background:rgba(77,159,255,.18)}
+/* .stamp's layout properties (margin-left:auto, flex:none, white-space) are set
+   with the rest of the header row rules further up; this block only keeps the
+   type styling so the two definitions cannot fight. */
+.stamp{color:var(--faint)}
+
+/* ---------- tiles ---------- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:18px}
+.tile{
+  background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);
+  border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;box-shadow:var(--shadow);
+  position:relative;overflow:hidden;
+}
+.tile::after{content:"";position:absolute;inset:0 0 auto 0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.09),transparent)}
+.tile .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:#ffdd00;margin-bottom:7px}
+.tile .v{font-size:25px;font-weight:660;letter-spacing:-.6px;font-variant-numeric:tabular-nums;line-height:1.05}
+.tile .s{font-size:12px;color:var(--dim);margin-top:4px}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--fg)}
+
+/* ---------- layout ---------- */
+.row{display:grid;gap:12px;margin-bottom:12px}
+.row.two{grid-template-columns:1.15fr .85fr}
+.row.half{grid-template-columns:1fr 1fr}
+@media(max-width:1000px){.row.two,.row.half{grid-template-columns:1fr}}
+
+/* ---------- portrait / phone ----------
+   Operator order: every card must be FULLY visible in portrait. A 430px
+   minimum card width overflowed a ~360-410px viewport, so the right-hand
+   columns of every card were clipped. Below this breakpoint the grid is
+   single-column, the stat row halves, and rows are allowed to wrap - no
+   element may exceed the viewport width. */
+@media (max-width:600px){
+  body{padding:14px 10px 40px}
+  .wrap{max-width:100%}
+  .cards{grid-template-columns:1fr;gap:10px}
+  .cstats{grid-template-columns:repeat(2,1fr);gap:8px 6px}
+  .ctop,.cfoot,.ph,.bar{flex-wrap:wrap}
+  .row.three{grid-template-columns:1fr}
+  .tile .v{font-size:22px}
+  .mono,.cname,.recs li{overflow-wrap:anywhere;word-break:break-word}
+  .card{padding:10px}
+}
+.panel{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;
+}
+.ph{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:13px 16px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.012);
+}
+.ph h2{font-size:12.5px;font-weight:620;letter-spacing:.04em;text-transform:uppercase;color:var(--fg)}
+.ph .note{font-size:11px;color:#ffdd00;font-weight:400;text-transform:none;letter-spacing:0}
+.pb{padding:14px 16px;flex:1}
+
+/* ---------- bits ---------- */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2.5px 9px;border-radius:999px;font-size:10.5px;font-weight:620;letter-spacing:.02em}
+.pill.ok{background:rgba(46,230,168,.13);color:var(--up)}
+.pill.no{background:rgba(168,10,10,.13);color:var(--down)}
+.pill.warn{background:rgba(255,180,84,.14);color:var(--amber)}
+.pill.info{background:rgba(77,159,255,.13);color:var(--blue)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px rgba(255,255,255,.05)}
+.pulse{animation:pl 2s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
+
+.kv{display:grid;grid-template-columns:1fr auto;gap:7px 14px;font-size:12.5px;align-items:center}
+.kv dt{color:var(--dim)}
+.kv dd{text-align:right;font-variant-numeric:tabular-nums}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{
+  text-align:left;padding:8px 10px;color:var(--faint);font-size:10px;font-weight:640;
+  text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+td{padding:8px 10px;border-bottom:1px solid rgba(31,41,55,.55);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:rgba(255,255,255,.022)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.tag{
+  display:inline-block;background:rgba(77,159,255,.12);color:var(--blue);
+  padding:1.5px 7px;border-radius:6px;font-size:10px;font-weight:600;white-space:nowrap;
+}
+.empty{padding:26px 14px;text-align:center;color:var(--faint);font-size:12.5px}
+
+.scroll{max-height:290px;overflow:auto}
+.scroll::-webkit-scrollbar{width:8px;height:8px}
+.scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px}
+
+canvas{max-height:250px;max-width:100%}
+
+/* ---------- controls ---------- */
+button{
+  background:rgba(77,159,255,.14);color:var(--blue);border:1px solid rgba(77,159,255,.28);
+  padding:5px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:600;
+  font-family:inherit;transition:.14s;white-space:nowrap;
+}
+button:hover{background:rgba(77,159,255,.26)}
+button.danger{background:rgba(168,10,10,.12);color:var(--down);border-color:rgba(168,10,10,.28)}
+button.danger:hover{background:rgba(168,10,10,.24)}
+button:disabled{opacity:.45;cursor:not-allowed}
+input[type=text],input[type=number]{
+  background:var(--bg);color:var(--fg);border:1px solid var(--line2);border-radius:8px;
+  padding:6px 10px;font-size:12px;width:100%;font-family:inherit;
+}
+input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,159,255,.13)}
+input[type=checkbox]{width:auto;margin:0;accent-color:var(--blue);vertical-align:middle;cursor:pointer}
+.field{margin-bottom:7px}
+.field label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);margin-bottom:4px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+pre{
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px;
+  font-size:11px;line-height:1.55;max-height:240px;overflow:auto;white-space:pre-wrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);margin:0;
+}
+.steps{margin:0;padding-left:18px;font-size:12.5px;line-height:1.85;color:var(--dim)}
+.steps li{margin-bottom:3px}
+.steps b{color:var(--fg);font-weight:620}
+.note-box{
+  background:rgba(255,180,84,.07);border:1px solid rgba(255,180,84,.22);
+  border-radius:10px;padding:10px 12px;font-size:11.5px;color:var(--dim);line-height:1.6;
+}
+.note-box b{color:var(--amber)}
+/* strategy cards: one per strategy, each with its own persistent curve */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(430px,100%),1fr));gap:12px}
+.row.three{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.card{
+  background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:11px 12px;
+  cursor:pointer;transition:border-color .15s,transform .15s;
+}
+.card:hover{border-color:var(--blue);transform:translateY(-1px)}
+.card.hot{border-color:rgba(46,230,168,.45)}
+.ctop{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.clabel{font-size:15px;font-weight:650}
+.cname{font-size:11.5px;color:var(--dim);margin-top:1px}
+.cproof{font-size:10px;color:var(--dim);margin-top:4px;min-height:12px}
+.recs{list-style:none;padding:0;margin:0}
+.recs li{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin:6px 0;font-size:12.5px}
+.cchart{height:54px;margin:8px 0 6px}
+/* Strategy cards get a taller curve than the compact feed cards - the per-card
+   P&L line is the reason to open a card, and at 54px it was unreadable. */
+.cards .cchart{height:104px;margin:10px 0 8px}
+.cstats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center}
+.cstats b{display:block;font-size:16px;font-weight:640}
+.cstats span{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+.cfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:9px;padding-top:8px;border-top:1px solid var(--line)}
+.cfoot button{padding:3px 9px;font-size:11px}
+code{background:var(--bg);border:1px solid var(--line2);border-radius:5px;padding:1px 5px;font-size:11px;font-family:ui-monospace,monospace}
+footer{margin-top:22px;text-align:center;color:var(--faint);font-size:11px}
+
+/* Strategy button loading animation: silvery circular effect */
+@keyframes borderSpin {
+  0% { border-image: conic-gradient(from 0deg, #c0c0c0 0deg, #e8e8e8 90deg, #c0c0c0 180deg, #a0a0a0 270deg, #c0c0c0 360deg) 1; }
+  100% { border-image: conic-gradient(from 360deg, #c0c0c0 0deg, #e8e8e8 90deg, #c0c0c0 180deg, #a0a0a0 270deg, #c0c0c0 360deg) 1; }
+}
+button.loading {
+  border: 2px solid;
+  border-image-source: conic-gradient(from 0deg, #c0c0c0, #e8e8e8, #c0c0c0, #a0a0a0, #c0c0c0);
+  border-image-slice: 1;
+  animation: borderSpin 1.2s linear infinite;
+  position: relative;
+}
+button.loading::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 3px;
+  background: conic-gradient(from 0deg, rgba(192,192,192,0.3), rgba(232,232,232,0.6), transparent);
+  animation: borderSpin 1.2s linear infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+/* Yellow variant for bulk operations (START ALL, STOP ALL) */
+@keyframes borderSpinYellow {
+  0% { border-image: conic-gradient(from 0deg, #FFD700 0deg, #FFED4E 90deg, #FFD700 180deg, #FFC700 270deg, #FFD700 360deg) 1; }
+  100% { border-image: conic-gradient(from 360deg, #FFD700 0deg, #FFED4E 90deg, #FFD700 180deg, #FFC700 270deg, #FFD700 360deg) 1; }
+}
+button.loading.yellow {
+  border: 2px solid;
+  border-image-source: conic-gradient(from 0deg, #FFD700, #FFED4E, #FFD700, #FFC700, #FFD700);
+  border-image-slice: 1;
+  animation: borderSpinYellow 1.2s linear infinite;
+}
+button.loading.yellow::after {
+  background: conic-gradient(from 0deg, rgba(255,215,0,0.3), rgba(255,237,78,0.6), transparent);
+  animation: borderSpinYellow 1.2s linear infinite;
+}
+</style>
+</head>
+<body data-mode="dry">
+<div class="wrap">
+
+<header>
+  <!-- One row: logo + wordmark, then the mode flag + DRY/LIVE switch, then the
+       host, then the render stamp hard right. Everything used to sit in a
+       right-hand column stacked three deep, which pushed the mode control away
+       from the name and made the header two visual bands on a wide screen. -->
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <img src="/static/logo.png" alt="Frigo" width="34" height="34" style="display:block">
+    </div>
+    <div class="brandtext">
+      <h1>Kalshi-Frigo <span>&middot; DRY trading dashboard</span></h1>
+      <div class="sub">LLM-driven Kalshi automation &middot; paper &amp; live &middot; multi-strategy</div>
+    </div>
+  </div>
+  <!-- State flag and switch share a row: the flag sits to the LEFT of the
+       buttons, so the mode and the control that changes it read together
+       instead of the flag floating above them. -->
+  <div class="moderow">
+    <!-- Unmistakable state flag. LIVE: brighter red fill, white text, thin
+         yellow border, silver shimmer. No blinking, no orbiting beacon. -->
+    <div id="modeFlag" class="modeflag live">
+      <span class="dot"></span>
+      <span id="modeFlagText">LIVE MODE</span>
+    </div>
+    <!-- DRY / LIVE switch. ALL NO MARKETS sits in the SAME control group with
+         the SAME styling as the two mode buttons: it is the third book of the
+         three, it opens its own page, and it must not read as a stray link
+         parked outside the control it belongs with. -->
+    <div class="modeswitch">
+      <a id="modeDry" class="modebtn" href="/">DRY</a>
+      <a id="modeLive" class="modebtn live on" href="/live">LIVE</a>
+      <a id="allNoBtn" class="modebtn allno" href="/all-no-markets" title="ALL NO MARKETS - NO-side only, maker entries, $250 of its own simulated money">ALL NO</a>
+    </div>
+  </div>
+  <div class="stamp">Rendered 2026-10-19 11:57:21</div>
+</header>
+
+
+
+
+
+
+
+<!-- ============ headline tiles ============ -->
+
+<!-- Headline tiles describe the ONE book: the real Kalshi account. The
+     simulated book is gone, so a headline can never describe a book the
+     bot is not actually trading. -->
+<div class="tiles">
+  <div class="tile">
+    <div class="k">Engine</div>
+    <div class="v"><span class="pill ok"><span class="dot pulse"></span>ONLINE</span></div>
+    <div class="s" id="tUptime">up 244m</div>
+  </div>
+  <div class="tile">
+    <div class="k">AI spend today</div>
+    <div class="v" id="tAiSpend">$0.00</div>
+    <div class="s">of $10.00 budget</div>
+  </div>
+
+  <div class="tile">
+    <div class="k">Kalshi balance</div>
+    <div class="v" id="tBalance">-</div>
+    <div class="s" id="tBalanceAge">&middot; syncing&hellip;</div>
+  </div>
+  <div class="tile">
+    <div class="k">Held contracts</div>
+    <div class="v" id="tLivePos">-</div>
+    <div class="s" id="tLivePosNote">&middot; reading Kalshi</div>
+  </div>
+  <div class="tile">
+    <div class="k">Exposure</div>
+    <div class="v" id="tExposure">-</div>
+    <div class="s" id="tExposureNote">&middot; mark-to-market</div>
+  </div>
+  <div class="tile">
+    <div class="k">Realized P&amp;L</div><div class="v" id="tKalshiPnl">-</div>
+    <div class="s" id="tKalshiPnlNote">&middot; from Kalshi</div>
+  </div>
+  
+  
+  <div class="tile">
+    <div class="k">Strategies live</div>
+    <div class="v" id="tRunning">9</div>
+    <div class="s">of 9 available</div>
+  </div>
+</div>
+
+<!-- ============ calibration ============ -->
+<div class="panel" style="margin-bottom:12px">
+  <div class="ph" style="cursor:pointer" onclick="toggleCalib()">
+    <h2>Calibration &mdash; outcomes by entry fair</h2>
+    <span class="note"><span id="calibToggle" style="cursor:pointer;font-weight:600">show</span> &middot; the model's own report card &middot; closed trades, current book</span>
+  </div>
+  <div class="pb" id="calibBodyWrap" style="display:none"><div class="scroll">
+  <table><thead><tr><th>Entry fair band</th><th class="num">Trades</th><th class="num">Wins</th><th class="num">Win %</th><th class="num">Net $</th></tr></thead>
+  <tbody id="fairBandsBody">
+    <tr><td>0.55-0.65</td><td class="num">984</td><td class="num">631</td><td class="num">64.1%</td><td class="num up">$166.07</td></tr>
+    <tr><td>0.65-0.75</td><td class="num">750</td><td class="num">525</td><td class="num">70.0%</td><td class="num up">$110.97</td></tr>
+    <tr><td>0.75-0.85</td><td class="num">1221</td><td class="num">918</td><td class="num">75.2%</td><td class="num up">$102.33</td></tr>
+    <tr><td>0.85 up</td><td class="num">1983</td><td class="num">1312</td><td class="num">66.2%</td><td class="num down">$-198.61</td></tr>
+  </tbody></table>
+  </div></div>
+</div>
+
+<!-- ============ openrouter usage ============ -->
+<div class="panel" style="margin-bottom:12px">
+  <div class="ph" style="cursor:pointer" onclick="toggleLlmUsage()">
+    <h2>OpenRouter key usage &mdash; what is actually consuming it</h2>
+    <span class="note"><span id="llmToggle" style="cursor:pointer;font-weight:600">show</span> &middot; lifetime, never reset &middot; DRY + LIVE together (one key)</span>
+  </div>
+  <div class="pb" id="llmUsageBodyWrap" style="display:none">
+    <div class="cstats" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));margin:0 0 12px">
+      <div><b id="llmCalls">&hellip;</b><span>calls</span></div>
+      <div><b id="llmTokens">&hellip;</b><span>tokens</span></div>
+      <div><b id="llmCost" class="down">&hellip;</b><span>tracked cost</span></div>
+      <div><b id="llmConsumers">&hellip;</b><span>consumers</span></div>
+    </div>
+    <div class="scroll">
+    <table><thead><tr><th>Strategy</th><th>Query type</th><th class="num">Calls</th><th class="num">Tokens</th><th class="num">Tracked cost</th><th>Last call</th></tr></thead><tbody id="llmUsageBody">
+      <tr><td colspan="6" class="empty">Loading&hellip;</td></tr>
+    </tbody></table>
+    </div>
+    <p class="note" style="margin-top:10px;color:var(--faint);font-size:11px">
+      "Tracked cost" is the cost the client computes per call; the "AI spend
+      today" tile above resets every deploy and under-reports. This table is
+      the lifetime log and does not reset &mdash; one key, both books, so DRY
+      and LIVE read the same account-wide numbers.
+    </p>
+  </div>
+</div>
+
+<!-- ============ strategy cards ============ -->
+<div class="panel" style="margin-bottom:12px">
+  <div class="ph">
+    <h2>Strategies</h2>
+    <span class="note">click a card for everything about that strategy</span>
+    <span class="bar">
+           <button id="startAllBtn" onclick="startAll()">Start all in DRY</button>
+           <button id="startAllLiveBtn" onclick="startAllLive()">Start all in LIVE</button>
+           <button onclick="stopAll()">Stop all</button>
+         </span>
+  </div>
+  <div class="pb">
+    <div class="cards">
+      <div class="card hot" id="card-btc_updown" onclick="openStrategy('btc_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">BTC 15-Min Up/Down</div>
+            <div class="mono cname">btc_updown</div>
+          </div>
+          <span class="pill ok" id="pill-btc_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-btc_updown">proof: cycle 2.8s ago</div>
+        <div class="cchart"><canvas id="spark-btc_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-btc_updown-trades">559</b><span>trades</span></div>
+          <div><b id="c-btc_updown-pnl" class="up">$70.47</b><span>realized</span></div>
+          <div><b id="c-btc_updown-win">78.0%</b><span>win rate</span></div>
+          <div><b id="c-btc_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-btc_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-btc_updown" onclick="toggleStrategy('btc_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('btc_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-btc_1h_updown" onclick="openStrategy('btc_1h_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">BTC 1-Hour Up/Down</div>
+            <div class="mono cname">btc_1h_updown</div>
+          </div>
+          <span class="pill ok" id="pill-btc_1h_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-btc_1h_updown">proof: cycle 2.9s ago</div>
+        <div class="cchart"><canvas id="spark-btc_1h_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-btc_1h_updown-trades">301</b><span>trades</span></div>
+          <div><b id="c-btc_1h_updown-pnl" class="up">$37.00</b><span>realized</span></div>
+          <div><b id="c-btc_1h_updown-win">74.4%</b><span>win rate</span></div>
+          <div><b id="c-btc_1h_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-btc_1h_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-btc_1h_updown" onclick="toggleStrategy('btc_1h_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('btc_1h_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-eth_updown" onclick="openStrategy('eth_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">ETH 15-Min Up/Down</div>
+            <div class="mono cname">eth_updown</div>
+          </div>
+          <span class="pill ok" id="pill-eth_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-eth_updown">proof: cycle 3.9s ago</div>
+        <div class="cchart"><canvas id="spark-eth_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-eth_updown-trades">0</b><span>trades</span></div>
+          <div><b id="c-eth_updown-pnl" class="flat">$0.00</b><span>realized</span></div>
+          <div><b id="c-eth_updown-win">0.0%</b><span>win rate</span></div>
+          <div><b id="c-eth_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-eth_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-eth_updown" onclick="toggleStrategy('eth_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('eth_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-eth_1h_updown" onclick="openStrategy('eth_1h_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">ETH 1-Hour Up/Down</div>
+            <div class="mono cname">eth_1h_updown</div>
+          </div>
+          <span class="pill ok" id="pill-eth_1h_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-eth_1h_updown">proof: cycle 4.9s ago</div>
+        <div class="cchart"><canvas id="spark-eth_1h_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-eth_1h_updown-trades">81</b><span>trades</span></div>
+          <div><b id="c-eth_1h_updown-pnl" class="up">$0.40</b><span>realized</span></div>
+          <div><b id="c-eth_1h_updown-win">58.0%</b><span>win rate</span></div>
+          <div><b id="c-eth_1h_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-eth_1h_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-eth_1h_updown" onclick="toggleStrategy('eth_1h_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('eth_1h_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-hyperliquid_updown" onclick="openStrategy('hyperliquid_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">Hyperliquid (HYPE) 15-Min Up/Down</div>
+            <div class="mono cname">hyperliquid_updown</div>
+          </div>
+          <span class="pill ok" id="pill-hyperliquid_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-hyperliquid_updown">proof: cycle 2.9s ago</div>
+        <div class="cchart"><canvas id="spark-hyperliquid_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-hyperliquid_updown-trades">556</b><span>trades</span></div>
+          <div><b id="c-hyperliquid_updown-pnl" class="up">$31.91</b><span>realized</span></div>
+          <div><b id="c-hyperliquid_updown-win">66.5%</b><span>win rate</span></div>
+          <div><b id="c-hyperliquid_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-hyperliquid_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-hyperliquid_updown" onclick="toggleStrategy('hyperliquid_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('hyperliquid_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-hyperliquid_1h_updown" onclick="openStrategy('hyperliquid_1h_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">Hyperliquid (HYPE) 1-Hour Up/Down</div>
+            <div class="mono cname">hyperliquid_1h_updown</div>
+          </div>
+          <span class="pill ok" id="pill-hyperliquid_1h_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-hyperliquid_1h_updown">proof: cycle 2.9s ago</div>
+        <div class="cchart"><canvas id="spark-hyperliquid_1h_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-hyperliquid_1h_updown-trades">0</b><span>trades</span></div>
+          <div><b id="c-hyperliquid_1h_updown-pnl" class="flat">$0.00</b><span>realized</span></div>
+          <div><b id="c-hyperliquid_1h_updown-win">0.0%</b><span>win rate</span></div>
+          <div><b id="c-hyperliquid_1h_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-hyperliquid_1h_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-hyperliquid_1h_updown" onclick="toggleStrategy('hyperliquid_1h_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('hyperliquid_1h_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-xrp_updown" onclick="openStrategy('xrp_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">XRP 15-Min Up/Down</div>
+            <div class="mono cname">xrp_updown</div>
+          </div>
+          <span class="pill ok" id="pill-xrp_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-xrp_updown">proof: cycle 2.8s ago</div>
+        <div class="cchart"><canvas id="spark-xrp_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-xrp_updown-trades">251</b><span>trades</span></div>
+          <div><b id="c-xrp_updown-pnl" class="up">$27.11</b><span>realized</span></div>
+          <div><b id="c-xrp_updown-win">82.5%</b><span>win rate</span></div>
+          <div><b id="c-xrp_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-xrp_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-xrp_updown" onclick="toggleStrategy('xrp_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('xrp_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-xrp_1h_updown" onclick="openStrategy('xrp_1h_updown')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">XRP 1-Hour Up/Down</div>
+            <div class="mono cname">xrp_1h_updown</div>
+          </div>
+          <span class="pill ok" id="pill-xrp_1h_updown"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-xrp_1h_updown">proof: cycle 3.9s ago</div>
+        <div class="cchart"><canvas id="spark-xrp_1h_updown" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-xrp_1h_updown-trades">41</b><span>trades</span></div>
+          <div><b id="c-xrp_1h_updown-pnl" class="down">$-8.29</b><span>realized</span></div>
+          <div><b id="c-xrp_1h_updown-win">63.4%</b><span>win rate</span></div>
+          <div><b id="c-xrp_1h_updown-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-xrp_1h_updown-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-xrp_1h_updown" onclick="toggleStrategy('xrp_1h_updown', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('xrp_1h_updown')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+      <div class="card hot" id="card-all_no_markets" onclick="openStrategy('all_no_markets')">
+        <div class="ctop">
+          <div>
+            <div class="clabel">all_no_markets</div>
+            <div class="mono cname">all_no_markets</div>
+          </div>
+          <span class="pill ok" id="pill-all_no_markets"><span class="dot pulse"></span>running</span>
+        </div>
+        <div class="cproof mono" id="hb-all_no_markets">proof: cycle 19.9s ago</div>
+        <div class="cchart"><canvas id="spark-all_no_markets" height="104"></canvas></div>
+        <div class="cstats">
+          <div><b id="c-all_no_markets-trades">0</b><span>trades</span></div>
+          <div><b id="c-all_no_markets-pnl" class="flat">$0.00</b><span>realized</span></div>
+          <div><b id="c-all_no_markets-win">0.0%</b><span>win rate</span></div>
+          <div><b id="c-all_no_markets-open">0</b><span>open</span></div>
+        </div>
+         <div class="cfoot">
+           <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-all_no_markets-dep">$0.00</span></span>
+           <span class="bar" onclick="event.stopPropagation()">
+             <button id="btn-all_no_markets" onclick="toggleStrategy('all_no_markets', false, this.textContent.trim() === 'Start')">Stop</button>
+             <button onclick="showAnalysis('all_no_markets')">ANALYSIS OF</button>
+           </span>
+         </div>
+      </div>
+    </div>
+    <p style="color:var(--faint);font-size:11.5px;margin-top:10px">
+      Curves are rebuilt from <code>trade_logs</code>, so a strategy keeps its history across restarts and deploys.
+      Cards show the <b>DRY</b> book only.
+    </p>
+  </div>
+</div>
+
+<!-- ============ feeds + account ============ -->
+<!-- Sits directly under the strategy cards and above the DRY account. The feed
+     tells you what the market is doing right now; the account tells you what the
+     book did about it. That order reads better than burying the live picture
+     under three panels of history. Collapsible because the numbers keep ticking
+     and the panel is tall. -->
+<div class="panel" id="feedsPanel" style="margin-bottom:12px">
+    <div class="ph" style="cursor:pointer" onclick="toggleFeeds()">
+      <h2>DRY feeds &amp;amp; account â€” simulated</h2>
+      <span class="note">
+        <span id="feedToggle" style="cursor:pointer;font-weight:600">hide</span>
+        &middot; synced 2026-10-19 11:56:37
+      </span>
+    </div>
+  <div id="feedsBody">
+  <div class="pb">
+    <div class="row three">
+      <div class="card" style="cursor:default">
+        <div class="ctop">
+          <div><div class="clabel">BTC spot</div><div class="mono cname" id="spotSource">connecting...</div></div>
+          <span class="pill" id="spotPill">--</span>
+        </div>
+        <div class="cchart" style="height:130px"><canvas id="spotChart"></canvas></div>
+        <div class="cfoot"><span class="mono" style="color:var(--faint)" id="spotAge">no tick yet</span></div>
+      </div>
+
+      <div class="card" style="cursor:default">
+        <div class="ctop">
+          <div>
+            <div class="clabel">Kalshi BTC 15-min</div>
+            <div class="mono cname" id="k15Ticker">KXBTC15M-26OCT190800-00</div>
+          </div>
+          <span class="pill" id="k15Pill">--</span>
+        </div>
+        <div class="cchart" style="height:130px"><canvas id="k15Chart"></canvas></div>
+        <div class="cstats" style="grid-template-columns:repeat(2,1fr);gap:4px 10px">
+          <div><b id="k15Up">--</b><span>UP ask</span></div>
+          <div><b id="k15Down">--</b><span>DOWN ask</span></div>
+          <div><b id="k15Target">--</b><span>target</span></div>
+          <div><b id="k15Clock">--</b><span>settles in</span></div>
+        </div>
+        <div class="cfoot">
+          <span class="mono" style="color:var(--faint)" id="k15Detail">waiting for the next contract</span>
+        </div>
+      </div>
+
+      <div class="card" style="cursor:default" id="accountCard">
+        <div class="ctop">
+          <div><div class="clabel" id="acctLabel">LIVE account — real Kalshi</div><div class="mono cname">live book</div></div>
+          <span class="pill ok" id="acctPill">DRY</span>
+        </div>
+        <div class="cchart" style="height:130px"><canvas id="accountChart"></canvas></div>
+        <div class="cstats">
+          <div><b id="acctEquity">$480.76</b><span>equity</span></div>
+          <div><b id="acctToday" class="flat">$0.00</b><span>today</span></div>
+          <div><b id="acctWin">0.0%</b><span>today WR</span></div>
+          <div><b id="acctOpen">0</b><span>open</span></div>
+        </div>
+        <div class="cfoot">
+          <span class="mono" style="color:var(--faint)" id="acctFoot">cash $480.76 &middot; 0 trades today</span>
+        </div>
+      </div>
+    </div>
+    <p style="color:var(--faint);font-size:11.5px;margin-top:10px">
+      Up/Down prices are Kalshi&#39;s own quotes for the next 15-minute contract, polled live. Settlement is the 60-second average of CF Benchmarks BRTI, so spot is a proxy for it - the comparison is measured, not assumed.
+      The contract resolves on the 60-second average of <b>CF Benchmarks BRTI</b> against the
+      previous window, so live spot is a <b>proxy</b> for the settlement value, not the value itself.
+      Spot vs target right now:
+      <b class="mono">+72.31</b>
+    </p>
+  </div>
+</div>
+
+<!-- ============ readiness + inventory ============ -->
+<div class="row two">
+  <div class="panel">
+    <div class="ph"><h2>System readiness</h2><span class="note">what is and isn't wired up</span></div>
+    <div class="pb">
+      <dl class="kv">
+        <dt>Kalshi API credentials</dt>
+        <dd><span class="pill ok">configured</span></dd>
+        <dt>OpenRouter API key</dt>
+        <dd><span class="pill ok">configured</span></dd>
+        <dt>Database</dt>
+        <dd><span class="pill ok">present</span></dd>
+        <dt>Database persistence</dt>
+        <dd><span class="pill ok">volume</span></dd>
+        <dt>Last Kalshi sync</dt><dd>2026-10-19 11:56:37</dd>
+        <dt>Database path</dt><dd class="mono" style="color:var(--faint)">/data/trading_system.db</dd>
+        <dt>Database backups</dt><dd id="dBackups">12 (every 6h, keeps 12)</dd>
+      </dl>
+      
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><h2>Data inventory</h2><span class="note">row counts per table</span></div>
+    <div class="pb">
+      <dl class="kv">
+        <dt class="mono">markets</dt><dd>18231</dd>
+        <dt class="mono">positions</dt><dd>5353</dd>
+        <dt class="mono">trade_logs</dt><dd>5149</dd>
+        <dt class="mono">market_analyses</dt><dd>0</dd>
+        <dt class="mono">daily_cost_tracking</dt><dd>0</dd>
+        <dt class="mono">llm_queries</dt><dd>28924</dd>
+        <dt class="mono">analysis_reports</dt><dd>0</dd>
+        <dt>LLM queries logged</dt><dd>28924</dd>
+        <dt>LLM tokens used</dt><dd>7832667</dd>
+        <dt>LLM spend (all time)</dt><dd>$74.4222</dd>
+      </dl>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ============ funding ============ -->
+<div class="row two">
+  <!-- DRY: the book funds itself out of simulated cash. The real Kalshi balance
+       never appears here - a funding card that answered with live money under a
+       DRY heading is what made the DRY page "pose" the live account. -->
+  <div class="panel">
+    <div class="ph">
+      <h2>DRY account â€” simulated money</h2>
+      <span class="note">rehearsal only</span>
+    </div>
+    <div class="pb">
+      <dl class="kv">
+        <dt>Simulated cash</dt><dd id="fBalance">$480.76</dd>
+        <dt>Baseline</dt><dd>$300.00</dd>
+        <dt>Deployed</dt><dd>$0.00</dd>
+        <dt>Equity</dt><dd>$480.76</dd>
+        <dt>Realized</dt><dd>$180.76</dd>
+        <dt>Closed trades</dt><dd>4938</dd>
+        <dt>Open positions</dt><dd>0</dd>
+        <dt>Win rate</dt><dd>69.1%</dd>
+        <dt>Return</dt><dd>60.3%</dd>
+        <dt>Can fund an order</dt>
+        <dd><span class="pill ok">yes</span></dd>
+      </dl>
+      <p class="note" style="margin-top:10px;color:var(--faint);font-size:11px">
+        Cash is <b>derived</b>, not stored: baseline + realized &minus; deployed.
+        Nothing is accumulated, so it cannot drift away from the rows it is
+        computed from.
+      </p>
+      <div class="bar" style="margin-top:10px;gap:6px">
+        <input type="number" id="dryCashAmount" step="0.01" min="1" placeholder="new amount"
+               style="width:120px"><button onclick="setDryCash()">Set amount</button>
+        <button onclick="resetDry()">Reset baseline</button>
+      </div>
+      
+    </div>
+  </div>
+  <!-- LIVE: the real account, real balance, real money. -->
+  <div class="panel">
+    <div class="ph">
+      <h2>LIVE account &mdash; real Kalshi</h2>
+      <span class="note">real money</span>
+    </div>
+    <div class="pb">
+      <dl class="kv">
+        <dt>API connection</dt>
+        <dd><span class="pill ok" id="liveConnPill">connected</span></dd>
+        <dt>Available balance</dt><dd id="liveBalance">$0.00</dd>
+        <dt>Portfolio value</dt><dd id="livePortfolio">-</dd>
+        <dt>Open positions</dt><dd id="liveOpenPos">-</dd>
+        <dt>Realized</dt><dd id="liveRealized">-</dd>
+        <dt>Exposure</dt><dd id="liveExposure">-</dd>
+        <dt>Can fund an order</dt>
+        <dd><span class="pill" id="liveFundPill">no</span></dd>
+      </dl>
+
+      <p class="note" style="margin-top:10px;color:var(--faint);font-size:11px">
+        These are real production numbers read from Kalshi. The trading engine
+        runs the simulated book; this page is the truth about the account.
+      </p>
+
+    </div>
+  </div>
+</div>
+
+<!-- ============ Kalshi account ============ -->
+<!-- LIVE ONLY. This panel is real money: real positions, real P&L, real fees.
+     Rendering it while the switch reads DRY put the production account's
+     positions in the middle of a page whose every other number was simulated,
+     which is precisely the DRY/LIVE blur this page is supposed to make
+     impossible. A DRY page now contains no real-account figures at all. -->
+<div class="panel" style="margin-bottom:12px">
+    <div class="ph">
+      <h2>Kalshi account &mdash; real, and being traded</h2>
+      <span class="note" id="kalshiSyncNote">synced from the production account</span>
+    </div>
+  <div class="pb">
+    <div class="row two">
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Market</th><th>Title</th><th class="num">Shares</th><th class="num">Exposure</th><th class="num">Traded</th><th class="num">Realized</th><th class="num">Fees</th></tr></thead>
+          <tbody id="kalshiMarkets"><tr><td colspan="7" class="empty">Reading Kalshi&hellip;</td></tr></tbody>
+        </table>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Event</th><th>Title</th><th class="num">Shares</th><th class="num">Cost</th><th class="num">Exposure</th><th class="num">Realized</th><th class="num">Fees</th></tr></thead>
+          <tbody id="kalshiEvents"><tr><td colspan="7" class="empty">No event positions.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ positions + equity ============ -->
+<div class="row two">
+  <div class="panel">
+    <div class="ph"><h2>Open positions</h2><span class="note">0 rows</span></div>
+    <div class="scroll">
+      <div class="empty">No open positions. The bot opens one after an LLM decision clears the confidence threshold.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><h2>Cumulative realized P&amp;L</h2><span class="note" id="pnlSummary"></span></div>
+    <div class="pb"><canvas id="pnlChart"></canvas></div>
+  </div>
+</div>
+
+<!-- ============ performance + recent trades ============ -->
+<div class="row half">
+  <div class="panel">
+    <div class="ph"><h2>Strategy performance</h2><span class="note">closed trades by strategy</span></div>
+    <table><thead><tr><th>Strategy</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">P&amp;L</th><th class="num">Best</th><th class="num">Worst</th></tr></thead><tbody>
+      <tr>
+        <td><span class="tag">btc_updown</span></td>
+        <td class="num">1119</td>
+        <td class="num">75.4%</td>
+        <td class="num up">176.33</td>
+        <td class="num up">34.33</td>
+        <td class="num down">-25.79</td>
+      </tr>
+      <tr>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="num">1064</td>
+        <td class="num">70.4%</td>
+        <td class="num up">143.99</td>
+        <td class="num up">39.88</td>
+        <td class="num down">-57.55</td>
+      </tr>
+      <tr>
+        <td><span class="tag">btc_1h_updown</span></td>
+        <td class="num">667</td>
+        <td class="num">65.1%</td>
+        <td class="num up">80.72</td>
+        <td class="num up">51.54</td>
+        <td class="num down">-76.02</td>
+      </tr>
+      <tr>
+        <td><span class="tag">eth_1h_updown</span></td>
+        <td class="num">409</td>
+        <td class="num">55.3%</td>
+        <td class="num up">52.77</td>
+        <td class="num up">35.47</td>
+        <td class="num down">-22.82</td>
+      </tr>
+      <tr>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="num">842</td>
+        <td class="num">77.7%</td>
+        <td class="num up">36.87</td>
+        <td class="num up">9.11</td>
+        <td class="num down">-41.45</td>
+      </tr>
+      <tr>
+        <td><span class="tag">eth_updown</span></td>
+        <td class="num">152</td>
+        <td class="num">77.0%</td>
+        <td class="num up">6.3</td>
+        <td class="num up">0.52</td>
+        <td class="num down">-0.15</td>
+      </tr>
+      <tr>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="num">71</td>
+        <td class="num">71.8%</td>
+        <td class="num up">3.35</td>
+        <td class="num up">1.2</td>
+        <td class="num down">-0.15</td>
+      </tr>
+      <tr>
+        <td><span class="tag">xrp_1h_updown</span></td>
+        <td class="num">135</td>
+        <td class="num">55.6%</td>
+        <td class="num down">-135.95</td>
+        <td class="num up">8.58</td>
+        <td class="num down">-63.97</td>
+      </tr>
+      <tr>
+        <td><span class="tag">xau_updown</span></td>
+        <td class="num">479</td>
+        <td class="num">49.3%</td>
+        <td class="num down">-183.62</td>
+        <td class="num up">8.92</td>
+        <td class="num down">-77.04</td>
+      </tr>
+    </tbody></table>
+  </div>
+
+  <div class="panel">
+    <div class="ph">
+      <h2>Recent closed trades</h2>
+      <span class="note" id="recentTradesSummary">25 most recent</span>
+      <span class="bar">
+        <button onclick="showAnalysis()">ANALYSIS OF</button>
+        <a class="tag" href="/api/trades/rtf">Download RTF</a>
+      </span>
+    </div>
+    <div class="scroll">
+    <table><thead><tr><th>Market</th><th>Title</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Qty</th><th class="num">BUY AMT $$$</th><th class="num">P&amp;L</th><th>Strategy</th><th>Exited</th></tr></thead><tbody id="recentTradesBody">
+      <tr>
+        <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
+          <td>ETH15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.650</td>
+        <td class="num">0.543</td>
+        <td class="num">1</td>
+        <td class="num">0.65</td>
+        <td class="num down">-0.14</td>
+        <td><span class="tag">eth_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:33</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
+          <td>ETH15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.660</td>
+        <td class="num">0.551</td>
+        <td class="num">1</td>
+        <td class="num">0.66</td>
+        <td class="num down">-0.14</td>
+        <td><span class="tag">eth_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:33</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
+          <td>HYPE15M Â· Oct 16 2026 12:45</td>
+        <td>YES</td>
+        <td class="num">0.520</td>
+        <td class="num">0.585</td>
+        <td class="num">1</td>
+        <td class="num">0.52</td>
+        <td class="num up">0.03</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:33</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
+          <td>HYPE15M Â· Oct 16 2026 12:45</td>
+        <td>YES</td>
+        <td class="num">0.520</td>
+        <td class="num">0.585</td>
+        <td class="num">1</td>
+        <td class="num">0.52</td>
+        <td class="num up">0.03</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:33</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
+          <td>ETH15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.710</td>
+        <td class="num">0.593</td>
+        <td class="num">1</td>
+        <td class="num">0.71</td>
+        <td class="num down">-0.15</td>
+        <td><span class="tag">eth_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:32</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.493</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num down">-0.13</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:32</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
+          <td>HYPE15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.640</td>
+        <td class="num">0.534</td>
+        <td class="num">1</td>
+        <td class="num">0.64</td>
+        <td class="num down">-0.14</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:32</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
+          <td>HYPE15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.640</td>
+        <td class="num">0.534</td>
+        <td class="num">1</td>
+        <td class="num">0.64</td>
+        <td class="num down">-0.14</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:32</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.660</td>
+        <td class="num">0.551</td>
+        <td class="num">1</td>
+        <td class="num">0.66</td>
+        <td class="num down">-0.14</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:32</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.660</td>
+        <td class="num">0.551</td>
+        <td class="num">1</td>
+        <td class="num">0.66</td>
+        <td class="num down">-0.14</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:32</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
+          <td>ETH15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.650</td>
+        <td class="num">0.705</td>
+        <td class="num">1</td>
+        <td class="num">0.65</td>
+        <td class="num up">0.02</td>
+        <td><span class="tag">eth_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:31</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
+          <td>ETH15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.610</td>
+        <td class="num">0.665</td>
+        <td class="num">1</td>
+        <td class="num">0.61</td>
+        <td class="num up">0.03</td>
+        <td><span class="tag">eth_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:31</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.665</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num up">0.05</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:31</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.685</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num up">0.07</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:30</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
+          <td>HYPED Â· T78.9999</td>
+        <td>YES</td>
+        <td class="num">0.640</td>
+        <td class="num">0.570</td>
+        <td class="num">1</td>
+        <td class="num">0.64</td>
+        <td class="num down">-0.1</td>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:30</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.655</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num up">0.04</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:30</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
+          <td>XRP15M Â· Oct 16 2026 12:45</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.655</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num up">0.04</td>
+        <td><span class="tag">xrp_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:30</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
+          <td>HYPED Â· T78.9999</td>
+        <td>YES</td>
+        <td class="num">0.640</td>
+        <td class="num">0.570</td>
+        <td class="num">1</td>
+        <td class="num">0.64</td>
+        <td class="num down">-0.1</td>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:30</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
+          <td>HYPED Â· T78.9999</td>
+        <td>YES</td>
+        <td class="num">0.710</td>
+        <td class="num">0.610</td>
+        <td class="num">1</td>
+        <td class="num">0.71</td>
+        <td class="num down">-0.13</td>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:29</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
+          <td>HYPED Â· T78.9999</td>
+        <td>YES</td>
+        <td class="num">0.710</td>
+        <td class="num">0.593</td>
+        <td class="num">1</td>
+        <td class="num">0.71</td>
+        <td class="num down">-0.15</td>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:29</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPED-26OCT1613-T79.2499">KXHYPED-26OCT1613-T79.24</td>
+          <td>HYPED Â· T79.2499</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.670</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num up">0.05</td>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:29</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPED-26OCT1613-T79.2499">KXHYPED-26OCT1613-T79.24</td>
+          <td>HYPED Â· T79.2499</td>
+        <td>NO</td>
+        <td class="num">0.590</td>
+        <td class="num">0.670</td>
+        <td class="num">1</td>
+        <td class="num">0.59</td>
+        <td class="num up">0.05</td>
+        <td><span class="tag">hyperliquid_1h_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:29</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161230-30">KXHYPE15M-26OCT161230-30</td>
+          <td>HYPE15M Â· Oct 16 2026 12:30</td>
+        <td>YES</td>
+        <td class="num">0.690</td>
+        <td class="num">0.620</td>
+        <td class="num">1</td>
+        <td class="num">0.69</td>
+        <td class="num down">-0.1</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:27</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161230-30">KXHYPE15M-26OCT161230-30</td>
+          <td>HYPE15M Â· Oct 16 2026 12:30</td>
+        <td>YES</td>
+        <td class="num">0.740</td>
+        <td class="num">0.618</td>
+        <td class="num">1</td>
+        <td class="num">0.74</td>
+        <td class="num down">-0.15</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:27</td>
+      </tr>
+      <tr>
+        <td class="mono" title="KXHYPE15M-26OCT161230-30">KXHYPE15M-26OCT161230-30</td>
+          <td>HYPE15M Â· Oct 16 2026 12:30</td>
+        <td>YES</td>
+        <td class="num">0.580</td>
+        <td class="num">0.495</td>
+        <td class="num">1</td>
+        <td class="num">0.58</td>
+        <td class="num down">-0.11</td>
+        <td><span class="tag">hyperliquid_updown</span></td>
+        <td class="mono" style="color:var(--faint)">2026-10-16T16:25</td>
+      </tr>
+    </tbody></table>
+    </div>
+    <div class="bar" style="justify-content:flex-end;padding:10px 14px">
+      <span class="note" id="recentTradesPageLabel">Page 1</span>
+      <button id="recentTradesPrev" type="button" onclick="loadRecentTrades(recentTradesPage - 1)" disabled>Previous</button>
+      <button id="recentTradesNext" type="button" onclick="loadRecentTrades(recentTradesPage + 1)" disabled>Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ trade analysis ============ -->
+<div class="panel" id="analysisPanel" style="margin-bottom:12px;display:none">
+  <div class="ph">
+    <h2 id="analysisTitle">ANALYSIS OF</h2>
+    <span class="note" id="analysisScope"></span>
+    <span class="bar"><button onclick="closeAnalysis()">Close</button></span>
+  </div>
+  <div class="pb" id="analysisBody"><div class="empty">Loading analysis&hellip;</div></div>
+</div>
+
+<!-- ============ strategy detail ============ -->
+<div class="panel" id="detailPanel" style="margin-bottom:12px;display:none">
+  <div class="ph">
+    <h2 id="detailTitle">Strategy</h2>
+    <span class="note" id="detailState"></span>
+    <span class="bar"><button onclick="closeStrategy()">Close</button></span>
+  </div>
+  <div class="pb" id="detailBody"></div>
+</div>
+
+<!-- ============ what it does ============ -->
+<div class="panel" style="margin-bottom:12px">
+  <div class="ph"><h2>What this system does</h2><span class="note">the trading pipeline</span></div>
+  <div class="pb">
+    <p style="color:var(--dim);font-size:12.5px;margin-bottom:10px">
+      Kalshi-Frigo scans prediction markets, asks an LLM whether each contract is mispriced,
+      sizes a position with fractional Kelly sizing, then manages exits with stop-loss,
+      take-profit and time-based rules. Every scan is recorded in SQLite &mdash; that is what
+      the numbers on this page are read from.
+    </p>
+    <ol class="steps">
+      <li><b>Ingest</b> &mdash; pulls open markets from the Kalshi API and upserts prices into <code>markets</code>.</li>
+      <li><b>Decide</b> &mdash; scores each eligible market with an LLM pass via OpenRouter, under a daily cost budget.</li>
+      <li><b>Execute</b> â€” sizes with full-Kelly and places orders, with price-sanity and fail-closed balance checks.</li>
+      <li><b>Track</b> &mdash; monitors open positions and closes them on stop-loss, take-profit, time or resolution, writing each close to <code>trade_logs</code>.</li>
+      <li><b>Evaluate</b> &mdash; aggregates realized P&amp;L, win rate and per-strategy attribution.</li>
+    </ol>
+    <div class="bar" style="margin-top:12px">
+      <span class="tag">python cli.py run --paper</span>
+      <span class="tag">--live</span>
+      <span style="font-size:11.5px;color:var(--faint)">Live trading additionally needs <code>LIVE_TRADING_ENABLED=true</code>.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ config + alerts ============ -->
+<div class="row half">
+  <div class="panel">
+    <div class="ph"><h2>Config editor</h2><span class="note" id="configStatus">in-memory only</span></div>
+    <div class="pb">
+        <div class="field"><label>max_position_size_pct</label>
+          <input type="text" data-key="max_position_size_pct" data-type="number" value="3.0">
+        </div>
+        <div class="field"><label>max_daily_loss_pct</label>
+          <input type="text" data-key="max_daily_loss_pct" data-type="number" value="10.0">
+        </div>
+        <div class="field"><label>max_positions</label>
+          <input type="text" data-key="max_positions" data-type="number" value="100">
+        </div>
+        <div class="field"><label>min_confidence_to_trade</label>
+          <input type="text" data-key="min_confidence_to_trade" data-type="number" value="0.4">
+        </div>
+        <div class="field"><label>kelly_fraction</label>
+          <input type="text" data-key="kelly_fraction" data-type="number" value="0.5">
+        </div>
+        <div class="field"><label>max_single_position</label>
+          <input type="text" data-key="max_single_position" data-type="number" value="0.05">
+        </div>
+        <div class="field"><label>daily_ai_budget</label>
+          <input type="text" data-key="daily_ai_budget" data-type="number" value="10.0">
+        </div>
+        <div class="field"><label>max_ai_cost_per_decision</label>
+          <input type="text" data-key="max_ai_cost_per_decision" data-type="number" value="0.08">
+        </div>
+        <div class="field"><label>scan_interval_seconds</label>
+          <input type="text" data-key="scan_interval_seconds" data-type="number" value="30">
+        </div>
+        <div class="field"><label>market_scan_interval</label>
+          <input type="text" data-key="market_scan_interval" data-type="number" value="30">
+        </div>
+        <div class="field"><label><input type="checkbox" data-key="use_kelly_criterion" data-type="boolean" checked> use_kelly_criterion</label></div>
+        <div class="field"><label><input type="checkbox" data-key="live_trading_enabled" data-type="boolean" > live_trading_enabled</label></div>
+        <div class="field"><label><input type="checkbox" data-key="paper_trading_mode" data-type="boolean" checked> paper_trading_mode</label></div>
+      <div class="bar" style="margin-top:10px"><button onclick="saveConfig()">Save config</button></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><h2>Alerts</h2><span class="note" id="alertStatus"></span></div>
+    <div class="pb">
+      <div class="field"><label>Telegram webhook</label><input type="text" id="tgUrl" value="" placeholder="https://api.telegram.org/..."></div>
+      <div class="field"><label>Discord webhook</label><input type="text" id="dcUrl" value="" placeholder="https://discord.com/api/webhooks/..."></div>
+      <div class="field"><label><input type="checkbox" id="alertEnabled" > Enable alerts</label></div>
+      <div class="bar" style="margin-top:10px"><button onclick="saveAlerts()">Save alerts</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ logs + feed ============ -->
+<div class="row half">
+  <div class="panel">
+    <div class="ph"><h2>Log tail</h2><span class="bar"><input type="text" id="logLines" value="100" style="width:64px"><button onclick="loadLogs()">Load</button></span></div>
+    <div class="pb"><pre id="logOutput">{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3267, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.98, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:56:42,230 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:42,261 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:56:42,273 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:56:42,273 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:42,277 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:56:42,277 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:42,280 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:56:42,285 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:42,285 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3268, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.96, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:56:46,630 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:46,674 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:56:46,693 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:56:46,693 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:46,697 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:56:46,697 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:46,700 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:56:46,705 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:46,705 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3269, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.81, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:56:51,021 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:51,052 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:56:51,066 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:56:51,066 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:51,071 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:56:51,071 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:51,074 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:56:51,079 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:51,079 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3270, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.64, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:56:55,403 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:55,433 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:56:55,444 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:56:55,445 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:55,448 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:56:55,448 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:55,451 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:56:55,457 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:55,457 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3271, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.94, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:56:59,807 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:59,843 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:56:59,859 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:56:59,860 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:59,864 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:56:59,864 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:59,866 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:56:59,870 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:59,871 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3272, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2420.0, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:57:04,182 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:04,211 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:57:04,223 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:57:04,223 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:04,227 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:57:04,227 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:04,230 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:57:04,234 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:04,234 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3273, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.2, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:57:08,549 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:08,582 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:57:08,596 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:57:08,596 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:08,600 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:57:08,600 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:08,603 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:57:08,608 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:08,608 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3274, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2418.92, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:57:12,959 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:12,987 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:57:12,998 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:57:12,998 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:13,001 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:57:13,002 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:13,006 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:57:13,017 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:13,017 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3275, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2418.73, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:57:17,336 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:17,372 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:57:17,388 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:57:17,388 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:17,393 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:57:17,393 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:17,397 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:57:17,401 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:17,402 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
+{&#39;signals&#39;: 0, &#39;actionable&#39;: 0, &#39;open_positions&#39;: 0, &#39;open_notional&#39;: 0, &#39;max_open_notional&#39;: 75.0, &#39;trades_today&#39;: 0, &#39;skipped_no_edge&#39;: 0, &#39;skipped_vol_warmup&#39;: 0, &#39;skipped_stale&#39;: 0, &#39;skipped_too_close&#39;: 0, &#39;skipped_unquoted&#39;: 3276, &#39;skipped_low_prob&#39;: 0, &#39;skipped_session&#39;: 0, &#39;skipped_ai_veto&#39;: 0, &#39;skipped_sentinel&#39;: 0, &#39;skipped_venue_guard&#39;: 0, &#39;skipped_poly_divergence&#39;: 0, &#39;skipped_momentum&#39;: 0, &#39;skipped_correlated&#39;: 0, &#39;skipped_news_sentiment&#39;: 0, &#39;last_error&#39;: &#39;&#39;, &#39;dry&#39;: True, &#39;certain_wins&#39;: 0, &#39;certain_win_net&#39;: 0.0, &#39;took&#39;: None, &#39;blocked&#39;: &#39;&#39;, &#39;contract&#39;: None, &#39;bucket&#39;: None, &#39;seconds_left&#39;: None, &#39;target&#39;: None, &#39;spot&#39;: 2419.09, &#39;spot_vs_target&#39;: None, &#39;fair_up&#39;: None, &#39;kalshi_up&#39;: None, &#39;live_budget&#39;: 2.81, &#39;variance_mult&#39;: 1.0, &#39;truth_source&#39;: &#39;none&#39;, &#39;brti_state&#39;: &#39;no-feed&#39;, &#39;required_edge&#39;: 0.06, &#39;reason&#39;: &#39;no contract is quoted&#39;}
+2026-10-19 11:57:21,713 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:21,742 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
+2026-10-19 11:57:21,755 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
+2026-10-19 11:57:21,755 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:21,759 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
+2026-10-19 11:57:21,759 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:21,762 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
+2026-10-19 11:57:21,767 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:21,767 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]</pre></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><h2>Live event feed</h2><span class="note">server-sent events</span></div>
+    <div class="pb"><pre id="tradeFeed">Connected. Waiting for events&hellip;</pre></div>
+  </div>
+</div>
+
+<footer>Kalshi-Frigo &middot; prediction-market automation &middot; not financial advice</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// Server-rendered snapshot: the page is already correct before any fetch runs,
+// and the poller below refreshes the exact same payload in place.
+const SNAPSHOT = {"__KAI_SNAPSHOT_PLACEHOLDER__":true};
+SNAPSHOT.mode = SNAPSHOT.mode || { mode: 'dry' };
+const EQUITY = { labels: [], pnl: [] };
+Object.assign(EQUITY, SNAPSHOT.equity || {});
+const $ = id => document.getElementById(id);
+const esc = v => String(v == null ? '' : v);
+let recentTradesPage = 1;
+let recentTradesRequest = 0;
+
+// --- live event feed ---
+const feed = [];
+function note(msg) {
+  feed.unshift('[' + new Date().toLocaleTimeString() + '] ' + msg);
+  if (feed.length > 60) feed.length = 60;
+  $('tradeFeed').textContent = feed.join('\n');
+}
+const es = new EventSource('/api/stream');
+es.onmessage = e => {
+  try { note(JSON.stringify(JSON.parse(e.data))); } catch (_) { note(e.data); }
+};
+// Event-driven tally: the server pushes a snapshot event the moment the
+// Kalshi numbers move, so the page refetches exactly when there is
+// something new. The interval below is fallback only.
+es.addEventListener('snapshot', () => { refresh(); });
+['strategy', 'alert', 'config'].forEach(n =>
+  es.addEventListener(n, e => note(n + ': ' + e.data)));
+es.onerror = () => note('stream disconnected - retrying...');
+
+// --- snapshot refresh ---
+// Re-paints the live panels in place from the same payload the server rendered,
+// so an open tab tracks Kalshi without a reload.
+function rows(cells, emptyMsg, colspan) {
+  if (!cells.length) return '<tr><td colspan="' + colspan + '" class="empty">' + emptyMsg + '</td></tr>';
+  return cells.map(c => '<tr>' + c + '</tr>').join('');
+}
+function num(v) { return v == null ? '-' : v; }
+function sgn(v) { return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
+function money(v) { return '$' + Number(v || 0).toFixed(2); }
+
+function mktTitle(ticker) {
+  return (SNAPSHOT.market_titles || {})[ticker] || ticker || '';
+}
+
+async function loadRecentTrades(page) {
+  const requestId = ++recentTradesRequest;
+  const requestedPage = Math.max(1, Number.parseInt(page, 10) || 1);
+  try {
+    const response = await fetch('/api/recent-trades?book=live&page=' + requestedPage + '&per_page=25');
+    const data = await response.json().catch(() => ({}));
+    if (requestId !== recentTradesRequest) return;
+    if (!response.ok || data.error) {
+      note('Closed trades: ' + (data.error || ('request failed (' + response.status + ')')));
+      return;
+    }
+
+    recentTradesPage = Number(data.page) || 1;
+    const body = $('recentTradesBody');
+    if (body) {
+      body.replaceChildren();
+      const trades = data.trades || [];
+      if (!trades.length) {
+        const row = document.createElement('tr');
+        const empty = document.createElement('td');
+        empty.colSpan = 10;
+        empty.className = 'empty';
+        empty.textContent = 'No closed trades recorded yet.';
+        row.appendChild(empty);
+        body.appendChild(row);
+      } else {
+        for (const trade of trades) {
+          const row = document.createElement('tr');
+          const addCell = (value, className, title) => {
+            const cell = document.createElement('td');
+            cell.textContent = value == null ? '' : String(value);
+            if (className) cell.className = className;
+            if (title) cell.title = title;
+            row.appendChild(cell);
+            return cell;
+          };
+          const market = String(trade.market_id || '?');
+          addCell(market.slice(0, 24), 'mono', market);
+          addCell(mktTitle(market));
+          addCell(trade.side);
+          addCell(trade.entry_price == null ? '-' : Number(trade.entry_price).toFixed(3), 'num');
+          addCell(trade.exit_price == null ? '-' : Number(trade.exit_price).toFixed(3), 'num');
+          addCell(trade.quantity, 'num');
+          addCell(money(trade.cost_basis), 'num');
+          addCell(money(trade.pnl), 'num ' + sgn(trade.pnl));
+          const strategyCell = addCell('');
+          const strategyTag = document.createElement('span');
+          strategyTag.className = 'tag';
+          strategyTag.textContent = trade.strategy || 'unattributed';
+          strategyCell.appendChild(strategyTag);
+          const exited = addCell(String(trade.exit_timestamp || '').slice(0, 16), 'mono');
+          exited.style.color = 'var(--faint)';
+          body.appendChild(row);
+        }
+      }
+    }
+
+    const pages = Math.max(1, Number(data.pages) || 1);
+    const pageLabel = $('recentTradesPageLabel');
+    if (pageLabel) pageLabel.textContent = 'Page ' + recentTradesPage + ' of ' + pages;
+    const summary = $('recentTradesSummary');
+    if (summary) {
+      const total = Number(data.total) || 0;
+      const first = total ? ((recentTradesPage - 1) * Number(data.per_page || 25) + 1) : 0;
+      const last = Math.min(recentTradesPage * Number(data.per_page || 25), total);
+      summary.textContent = 'Showing ' + first + '-' + last + ' of ' + total +
+        ' closed trades (' + String(data.book || '').toUpperCase() + ')';
+    }
+    const previous = $('recentTradesPrev');
+    const next = $('recentTradesNext');
+    if (previous) previous.disabled = recentTradesPage <= 1;
+    if (next) next.disabled = recentTradesPage >= pages;
+  } catch (error) {
+    note('Closed trades: ' + error.message);
+  }
+}
+
+function paint(s) {
+  if (!s) return;
+  loadRecentTrades(recentTradesPage);
+  const k = s.kalshi || {};
+
+  const mk = k.markets || [], ev = k.events || [];
+  const mkBody = document.getElementById('kalshiMarkets');
+  const evBody = document.getElementById('kalshiEvents');
+  if (mkBody) {
+    mkBody.innerHTML = rows(mk.map(r =>
+      '<td class="mono">' + esc(r.ticker) + '</td>' +
+      '<td>' + esc(mktTitle(r.ticker)) + '</td>' +
+      '<td class="num">' + num(r.shares) + '</td>' +
+      '<td class="num">' + num(r.exposure) + '</td>' +
+      '<td class="num">' + num(r.traded) + '</td>' +
+      '<td class="num ' + sgn(r.realized) + '">' + num(r.realized) + '</td>' +
+      '<td class="num" style="color:var(--faint)">' + num(r.fees) + '</td>'
+    ), 'No market positions.', 7);
+  }
+  if (evBody) {
+    evBody.innerHTML = rows(ev.map(r =>
+      '<td class="mono">' + esc(r.event || r.ticker) + '</td>' +
+      '<td>' + esc(mktTitle(r.event || r.ticker)) + '</td>' +
+      '<td class="num">' + num(r.shares) + '</td>' +
+      '<td class="num">' + num(r.cost) + '</td>' +
+      '<td class="num">' + num(r.exposure) + '</td>' +
+      '<td class="num ' + sgn(r.realized) + '">' + num(r.realized) + '</td>' +
+      '<td class="num" style="color:var(--faint)">' + num(r.fees) + '</td>'
+    ), 'No event positions.', 7);
+  }
+
+  const posBody = document.getElementById('posBody');
+  if (posBody) {
+    posBody.innerHTML = rows((s.positions || []).map(p =>
+      '<td class="mono">' + esc(String(p.market_id || '?').slice(0, 26)) + '</td>' +
+      '<td>' + esc(mktTitle(p.market_id)) + '</td>' +
+      '<td><span class="tag">' + esc(p.side) + '</span></td>' +
+      '<td class="num">' + (p.entry_price == null ? '-' : Number(p.entry_price).toFixed(3)) + '</td>' +
+      '<td class="num">' + num(p.quantity) + '</td>' +
+      '<td><span class="tag">' + esc(p.strategy) + '</span></td>' +
+      '<td class="num">' + num(p.stop_loss) + '</td>' +
+      '<td class="num">' + num(p.take_profit) + '</td>'
+    ), 'No open positions.', 8);
+  }
+
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+
+  // The headline tiles are mode-specific markup, and each set of ids is written
+  // from its OWN book. The DRY and LIVE tiles previously shared element ids, so
+  // this line wrote the real Kalshi balance, position count, exposure and
+  // realized P&L into the DRY tiles ten seconds after load - the page
+  // contradicting its own DRY MODE flag. Live ids do not exist in DRY and vice
+  // versa, so each write is a no-op in the other mode rather than a leak.
+
+  // --- LIVE headline tiles: always updated from the LIVE book ---
+  const live = s.accounts && s.accounts.live || {};
+  const setLive = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  setLive('tBalance', s.balance == null ? '-' : money(s.balance));
+  setLive('tLivePos', live.open_positions || 0);
+  setLive('tExposure', money(live.exposure || 0));
+  setLive('tKalshiPnl', money(live.realized || 0));
+  const kr = document.getElementById('tKalshiPnl');
+  if (kr) kr.className = 'v ' + sgn(live.realized || 0);
+  setLive('tKalshiPnlNote',
+    'sales ' + money((live.fills || []).filter(f => f.action === 'sell').reduce((a, f) => a + (f.price || 0) * f.quantity, 0)) +
+    ' · settled ' + money(live.realized || 0) +
+    ' · ' + (live.closed_trades || 0) + ' closed trades');
+  // Also update the account panel stats
+  const acctEq = $('acctEquity');
+  if (acctEq) acctEq.textContent = money(s.balance == null ? 0 : s.balance);
+  const fBal = $('fBalance');
+  if (fBal) fBal.textContent = money(s.balance == null ? 0 : s.balance);
+  const fReal = $('fRealized');
+  if (fReal) fReal.textContent = money(live.realized || 0);
+  const fClosed = $('fClosed');
+  if (fClosed) fClosed.textContent = live.closed_trades || 0;
+  const fWin = $('fWinRate');
+  if (fWin) fWin.textContent = (live.win_rate || 0) + '%';
+
+  if (s.mode && s.mode.mode === 'live') {
+    set('tBalance', s.balance == null ? '-' : money(s.balance));
+    // Freshness truth under the balance: a number with no age is how a dead
+    // $0.29 reads as the live truth forever. Over 3 minutes old means the
+    // Kalshi sync is failing, and the errors panel says why.
+    var ageEl = $('tBalanceAge');
+    if (ageEl) {
+      var age = s.kalshi_age_sec;
+      if (age == null || age < 0) { ageEl.textContent = 'Â· syncingâ€¦'; ageEl.style.color = ''; }
+      else if (age > 180) { ageEl.textContent = 'Â· STALE (' + Math.round(age / 60) + 'm old) â€” sync failing'; ageEl.style.color = '#ff5555'; }
+      else { ageEl.textContent = 'Â· updated ' + age + 's ago'; ageEl.style.color = ''; }
+    }
+    // Held contracts, not raw rows: Kalshi keeps a zero-share row per ticker the
+    // account ever touched, and summing those reported 31 "positions" when 3
+    // were held.
+    const held = k.held_count != null
+      ? k.held_count : (k.market_count || 0) + (k.event_count || 0);
+    set('tLivePos', held);
+    set('tLivePosNote',
+          (k.held_count || 0) + ' held Â· ' + (k.ghost_count || 0) +
+          ' flat rows on Kalshi\'s side (no shares, cannot be deleted)');
+    set('tExposure', money(k.exposure));
+    set('tExposureNote',
+      'mark-to-market Â· ' + (k.cost_basis_known
+        ? 'cost ' + money(k.cost_basis)
+        : (k.realized_known
+          ? 'cost unknown (' + (k.cost_basis_missing || 0) + ' holding' +
+            (k.cost_basis_missing === 1 ? '' : 's') + ' predate fill history)'
+          : 'cost n/a')));
+    set('tKalshiPnl', money(k.realized));
+    const kr = document.getElementById('tKalshiPnl');
+    if (kr) kr.className = 'v ' + sgn(k.realized || 0);
+    const led = k.ledger || {};
+    set('tKalshiPnlNote',
+      'sales ' + money(led.sales_realized) +
+      ' Â· settled ' + money(led.settlement_realized) +
+      ' Â· fees ' + money(k.fees) +
+      (led.window_start ? ' Â· since ' + String(led.window_start).slice(0, 10) : ''));
+
+    // The LIVE funding card on this page: the real production account.
+    const lv = (s.accounts && s.accounts.live) || {};
+    set('liveBalance', money(lv.cash));
+    set('livePortfolio', money(lv.portfolio_value));
+    set('liveOpenPos', lv.open_positions == null ? '-' : lv.open_positions);
+    set('liveRealized', money(lv.realized));
+    set('liveExposure', money(lv.exposure));
+    const fp = $('liveFundPill');
+    if (fp) {
+      const funded = Number(lv.cash || 0) >= 1;
+      fp.className = 'pill ' + (funded ? 'ok' : 'no');
+      fp.textContent = funded ? 'yes' : 'no';
+    }
+    const cp = $('liveConnPill');
+    if (cp) {
+      const bad = !!lv.error;
+      cp.className = 'pill ' + (bad ? 'no' : 'ok');
+      cp.textContent = bad ? 'error' : 'connected';
+    }
+  }
+
+  const t = s.trades || {}, d = s.data || {};
+  const fb = document.getElementById('fairBandsBody');
+  if (fb && t.by_fair_band) {
+    fb.innerHTML = t.by_fair_band.length
+      ? t.by_fair_band.map(function (b) {
+          return '<tr><td>' + b.band + '</td><td class="num">' + b.trades + '</td><td class="num">' + b.wins + '</td><td class="num">' + b.win_rate + '%</td><td class="num ' + sgn(b.pnl) + '">' + money(b.pnl) + '</td></tr>';
+        }).join('')
+      : '<tr><td colspan="5" class="empty">No closed trades yet</td></tr>';
+  }
+  set('tWinRate', (t.win_rate || 0) + '%');
+  set('tWinRateNote', (t.wins || 0) + 'W / ' + (t.losses || 0) + 'L');
+  set('tWinRateLive', (t.win_rate || 0) + '%');
+  set('tWinRateLiveNote', (t.wins || 0) + 'W / ' + (t.losses || 0) + 'L');
+  set('dRet', (d.dry && d.dry.win_rate ? d.dry.win_rate : 0) + '%');
+  set('tAiSpend', money(d.ai_cost_today));
+  set('tRunning', s.running_count || 0);
+  set('tUptime', Math.floor((s.uptime_sec || 0) / 60) + 'm');
+
+  SNAPSHOT.equity = s.equity || SNAPSHOT.equity;
+  paintCards(s.strategy_cards);
+  const eq = SNAPSHOT.equity || {};
+  const closes = (eq.pnl || []).length;
+  set('pnlSummary', closes
+    ? closes + ' closed trades'
+    : 'no closed trades yet');
+}
+
+function paintCards(cards) {
+  if (!cards) return;
+  SNAPSHOT.strategy_cards = cards;
+  cards.forEach(c => {
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set('c-' + c.name + '-trades', c.trades);
+  set('c-' + c.name + '-win', c.win_rate + '%');
+  set('c-' + c.name + '-open', c.open_positions);
+  set('c-' + c.name + '-dep', Number(c.deployed || 0).toFixed(2));
+    const pnl = $('c-' + c.name + '-pnl');
+    if (pnl) {
+      pnl.textContent = money(c.realized);
+      pnl.className = c.realized > 0 ? 'up' : (c.realized < 0 ? 'down' : 'flat');
+    }
+    const card = $('card-' + c.name);
+    if (card) card.classList.toggle('hot', !!c.running);
+    const pill = $('pill-' + c.name);
+    if (pill) {
+      // Constant live proof: running means the strategy's own process stamped
+      // a heartbeat this cycle - not merely that a pid exists. A stuck
+      // strategy (pid alive, no recent heartbeat) is named as such.
+      if (c.stuck) {
+        pill.className = 'pill warn';
+        pill.innerHTML = '<span class="dot"></span>stuck';
+      } else {
+        pill.className = 'pill ' + (c.running ? 'ok' : 'no');
+        pill.innerHTML = c.running
+          ? '<span class="dot pulse"></span>running'
+          : (c.stop_reason ? 'stopped' : 'not started');
+      }
+    }
+    const hb = $('hb-' + c.name);
+    if (hb) {
+      hb.textContent = c.running && c.heartbeat_age_sec != null
+        ? ('proof: cycle ' + c.heartbeat_age_sec + 's ago')
+        : (c.stuck ? ('stuck: last cycle ' + c.heartbeat_age_sec + 's ago') : '');
+    }
+    const btn = $('btn-' + c.name);
+    if (btn) btn.textContent = c.running ? 'Stop' : 'Start';
+  });
+  drawSparks(cards);
+}
+
+async function refresh() {
+  try {
+    paint(await fetch('/api/snapshot?book=live').then(r => r.json()));
+    drawChart();
+    // Keep an open detail view current without yanking the page around.
+    if (openName) openStrategy(openName, true);
+
+  } catch (e) {
+    note('snapshot refresh failed: ' + e.message);
+  }
+  try { refreshLlmUsage(); } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter usage - who is eating the key, itemised from the lifetime log
+// ---------------------------------------------------------------------------
+let llmUsageReq = 0;
+
+function toggleLlmUsage() {
+  const wrap = $('llmUsageBodyWrap');
+  const t = $('llmToggle');
+  if (!wrap || !t) return;
+  if (wrap.style.display === 'none') {
+    wrap.style.display = '';
+    t.textContent = 'hide';
+    refreshLlmUsage();
+  } else {
+    wrap.style.display = 'none';
+    t.textContent = 'show';
+  }
+}
+
+function toggleCalib() {
+  const wrap = $('calibBodyWrap');
+  const t = $('calibToggle');
+  if (!wrap || !t) return;
+  const hidden = wrap.style.display === 'none';
+  wrap.style.display = hidden ? '' : 'none';
+  t.textContent = hidden ? 'hide' : 'show';
+}
+
+async function refreshLlmUsage() {
+  const wrap = $('llmUsageBodyWrap');
+  if (wrap && wrap.style.display === 'none') return;
+  const req = ++llmUsageReq;
+  const r = await fetch('/api/llm/usage');
+  const d = await r.json().catch(() => null);
+  if (!d || req !== llmUsageReq) return;
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set('llmCalls', d.total_calls.toLocaleString());
+  set('llmTokens', d.total_tokens.toLocaleString());
+  const c = $('llmCost');
+  if (c) c.textContent = '$' + d.total_cost.toFixed(2);
+  set('llmConsumers', (d.consumers || []).length);
+  const body = $('llmUsageBody');
+  if (!body) return;
+  if (!d.consumers || !d.consumers.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">No LLM calls logged yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = d.consumers.map(x =>
+    '<tr><td><span class="tag">' + esc(x.strategy) + '</span></td>'
+    + '<td class="mono" style="color:var(--dim)">' + esc(x.query_type) + '</td>'
+    + '<td class="num">' + x.calls.toLocaleString() + '</td>'
+    + '<td class="num">' + x.tokens.toLocaleString() + '</td>'
+    + '<td class="num down">$' + x.cost.toFixed(2) + '</td>'
+    + '<td class="mono" style="color:var(--faint)">' + esc(x.last_at) + '</td></tr>'
+  ).join('');
+}
+
+// --- DRY / LIVE mode -----------------------------------------------------
+// The write token is embedded server-side so the controls work without a
+// prompt. WARNING: this dashboard is on a public hostname, so anyone who can
+// load the page can also read this value out of view-source and therefore use
+// every write endpoint (mode switch, strategy start/stop, config). The token
+// gate still stops drive-by POSTs from scripts that never loaded the page; it
+// is no longer a boundary against a determined visitor.
+const WRITE_TOKEN = "Is5GsycXi2rMP6rlPaIBGXFnYwaGG6G9gcAwx5lgqWo";
+sessionStorage.setItem('frigoToken', WRITE_TOKEN);
+
+function authHeaders(extra) {
+  return Object.assign({ 'Content-Type': 'application/json' },
+    { 'X-Auth-Token': WRITE_TOKEN }, extra || {});
+}
+
+
+
+// Toggle the NO LANES ON/OFF switch. Persisted to runtime_config so both the
+// DRY/LIVE dashboard and the ALL NO MARKETS page see the same state. The button
+// is black by default and turns YELLOW when ON.
+async function toggleNoLanes() {
+  try {
+    // Read current state from the button class
+    const btn = $('noLanesBtn');
+    const currentlyOn = btn.classList.contains('on');
+    const next = !currentlyOn;
+    const r = await fetch('/api/no-lanes', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled: next }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.error) {
+      note('NO LANES toggle failed: ' + d.error);
+      return;
+    }
+    note('NO LANES is now ' + (next ? 'ON' : 'OFF'));
+    paintNoLanes(next);
+    flashBanner('NO LANES ' + (next ? 'ON' : 'OFF'), false);
+  } catch (e) {
+    note('NO LANES toggle failed: ' + e.message);
+  }
+}
+
+// Paint the NO LANES button state. Called after a toggle and after a mode
+// switch reload. The button reads its state from SNAPSHOT (which carries
+// no_lanes_enabled from _mode_payload).
+function paintNoLanes(enabled) {
+  const btn = $('noLanesBtn');
+  if (!btn) return;
+  btn.classList.toggle('on', !!enabled);
+  btn.textContent = 'NO LANES ' + (enabled ? 'ON' : 'OFF');
+}
+
+// Re-read the authoritative NO LANES state after any ambiguous toggle attempt.
+async function syncNoLanesFromServer(why) {
+  try {
+    const d = await fetch('/api/no-lanes').then(r => r.json());
+    paintNoLanes(d.no_lanes_enabled === true);
+    if (why) note('NO LANES resynced from server' + (why ? ' - ' + why : ''));
+  } catch (_) {
+    paintNoLanes(SNAPSHOT.no_lanes_enabled === true);
+  }
+}
+
+// Re-read the authoritative mode after any ambiguous switch attempt. SNAPSHOT is
+// a rendering of the page as it was served; it cannot describe a mode change that
+// happened after that.
+
+// A temporary full-width banner so a mode change is impossible to miss even if
+// you looked away at the moment it happened.
+let bannerTimer = null;
+function flashBanner(text, isLive) {
+  let el = $('modeBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'modeBanner';
+    el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:10000;' +
+      'padding:14px 18px;text-align:center;font-weight:800;letter-spacing:.12em;' +
+      'font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.5)';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.background = isLive ? '#a30808' : '#2ee6a8';
+  el.style.color = '#000';
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { el.remove(); }, 6000);
+}
+
+function money(v) { return '$' + Number(v || 0).toFixed(2); }
+
+// One function owns every mode indicator: frame colour, body attribute, flag
+// text, button state, title and favicon. They cannot drift apart.
+let lastMode = document.body.dataset.mode || 'dry';// --- DRY book controls ---
+// DRY cash is DERIVED (baseline + realized - deployed), so "set amount" moves
+// the BASELINE the identity runs from rather than writing a cash number. Every
+// open row and every close stays accounted for by the same arithmetic, which is
+// what the old running-counter cash could never promise.
+async function setDryCash() {
+  const raw = $('dryCashAmount') ? $('dryCashAmount').value : '';
+  const amount = Number(raw);
+  if (!amount || amount <= 0) { note('enter a positive amount first'); return; }
+  const r = await fetch('/api/dry/cash', {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ amount: amount }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (d.error) { note('DRY cash set failed: ' + d.error); return; }
+  note('DRY baseline set to ' + money(d.dry.cash));
+
+}
+
+async function resetDry() {
+  const r = await fetch('/api/dry/reset', { method: 'POST', headers: authHeaders() });
+  const d = await r.json().catch(() => ({}));
+  if (d.error) { note('DRY reset failed: ' + d.error); return; }
+  note('DRY book reset to ' + money(d.dry.starting_balance));
+
+}
+
+// --- controls ---
+async function toggleStrategy(name, quiet, desiredState) {
+  const btn = document.getElementById('btn-' + name);
+  let wantedRunning;
+  if (typeof desiredState === 'boolean') {
+    wantedRunning = desiredState;
+  } else {
+    const card = (SNAPSHOT.strategy_cards || []).find(c => c.name === name);
+    wantedRunning = !!card && !card.running;
+  }
+
+  if (btn) btn.classList.add('loading');
+
+  try {
+    let r = await fetch('/api/strategy/' + encodeURIComponent(name) + '/toggle', {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ running: wantedRunning }),
+    });
+
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) {
+      if (!quiet) note(name + ': ' + (d.error || ('request failed (' + r.status + ')')));
+      return;
+    }
+    if (typeof d.running === 'boolean' && d.running !== wantedRunning) {
+      if (!quiet) note(name + ': server did not accept the requested state change');
+      return;
+    }
+    if (!quiet) note(name + ': ' + (wantedRunning ? 'start accepted' : 'stop accepted'));
+
+    let maxWait = 120;
+    let pollCount = 0;
+
+    while (pollCount < maxWait) {
+      const delayMs = pollCount < 10 ? 200 : 500;
+      await new Promise(r => setTimeout(r, delayMs));
+      pollCount++;
+
+      try {
+        const strategiesResp = await fetch('/api/strategies', { headers: authHeaders() });
+        const strategiesData = await strategiesResp.json().catch(() => ({}));
+        const strategyData = strategiesData[name];
+
+        const snapshotResp = await fetch('/api/snapshot', { headers: authHeaders() });
+        const snapshot = await snapshotResp.json().catch(() => ({}));
+        const cards = snapshot.strategy_cards || [];
+        const card = cards.find(c => c.name === name);
+
+        const apiReady = strategyData && strategyData.running === wantedRunning;
+        const chartReady = card && card.running === wantedRunning;
+
+        if (apiReady && chartReady) {
+          if (!quiet) {
+            note(name + ': ' + (wantedRunning ? 'started successfully' : 'stopped successfully'));
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+
+    if (pollCount >= maxWait && btn) {
+      note(name + ': Timeout waiting for state change. Check the strategy chart.');
+    }
+  } finally {
+    if (btn) btn.classList.remove('loading');
+    refresh();
+  }
+}
+async function saveAlerts() {
+  const r = await fetch('/api/alerts', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      telegram_url: $('tgUrl').value,
+      discord_url: $('dcUrl').value,
+      enabled: $('alertEnabled').checked,
+    }),
+  });
+  const d = await r.json().catch(() => ({}));
+  $('alertStatus').textContent = d.ok ? 'saved' : 'error';
+}
+async function saveConfig() {
+  const obj = {};
+  document.querySelectorAll('.pb input[data-key]').forEach(i => {
+    const t = i.dataset.type;
+    if (t === 'boolean') obj[i.dataset.key] = i.checked;
+    else if (t === 'number') obj[i.dataset.key] = i.value === '' ? null : Number(i.value);
+    else obj[i.dataset.key] = i.value;
+  });
+  const r = await fetch('/api/config', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(obj),
+  });
+  const d = await r.json().catch(() => ({}));
+  $('configStatus').textContent = d.ok ? 'saved ' + (d.updated || []).length + ' field(s)' : 'error';
+}
+async function loadLogs() {
+  const n = $('logLines').value || 100;
+  const r = await fetch('/api/logs?lines=' + encodeURIComponent(n)).then(r => r.json());
+  $('logOutput').textContent = (r.lines || []).join('\n') || 'No log files yet.';
+}
+
+// --- equity chart, drawn from server-rendered data ---
+let chart;
+function drawChart() {
+  if (typeof Chart === 'undefined') return;
+  const ctx = $('pnlChart');
+  if (!ctx) return;
+  if (typeof Chart === 'undefined') return;
+  if (chart) chart.destroy();
+  const flat = !(EQUITY.pnl && EQUITY.pnl.length);
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: flat ? ['no closed trades yet'] : EQUITY.labels,
+      datasets: [{
+        label: 'Cumulative P&L ($)',
+        data: flat ? [0] : EQUITY.pnl,
+        borderColor: '#2ee6a8',
+        backgroundColor: 'rgba(46,230,168,.10)',
+        tension: 0.3, fill: true, pointRadius: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { labels: { color: '#e6edf6', boxWidth: 10 } } },
+      scales: {
+        x: { ticks: { color: '#5b6a80', maxTicksLimit: 7 }, grid: { color: 'rgba(255,255,255,.04)' } },
+        y: { ticks: { color: '#5b6a80' }, grid: { color: 'rgba(255,255,255,.04)' } },
+      },
+    },
+  });
+}
+
+// --- live feeds: BTC spot, Kalshi ladder, account curve ---
+// Drawn from whatever the server has cached, then polled. Nothing here invents
+// a number: an empty series renders "waiting" rather than a flat line that reads
+// like a real result.
+const feedCharts = {};
+function drawFeed(id, labels, datasets, opts) {
+  if (typeof Chart === 'undefined') return;
+  const ctx = $(id);
+  if (!ctx) return;
+  const cfg = {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: Object.assign({
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { labels: { color: '#e6edf6', boxWidth: 12, font: { size: 12 } } } },
+      scales: {
+        x: { ticks: { color: '#8494ab', maxTicksLimit: 5, font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+        y: { ticks: { color: '#8494ab', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+      },
+    }, opts || {}),
+  };
+  if (typeof Chart === 'undefined') return;
+  if (feedCharts[id]) { feedCharts[id].destroy(); }
+  feedCharts[id] = new Chart(ctx, cfg);
+}
+function hhmmss(t) { return new Date(t * 1000).toLocaleTimeString(); }
+
+function paintMarket(md) {
+  if (!md || !md.spot) return;
+  var ctx_feed_error = "";
+  const spot = md.spot || {};
+
+  // The two charts answer different questions, so they get different windows:
+  // spot is a day of context ("where is BTC today"), the 15-minute contract is
+  // a quarter-hour ("where is it versus this contract's target"). One shared
+  // window made both useless - the contract chart spent most of its width on
+  // history belonging to contracts that had already settled.
+  const SPOT_WINDOW = 86400;   // 1 day
+  const K15_WINDOW = 900;      // 15 minutes
+  const nowS = Date.now() / 1000;
+  const within = function (pts, secs) {
+    return (pts || []).filter(function (p) { return nowS - p.t <= secs; });
+  };
+  // Green when the visible window closed higher, red when lower. This is the
+  // convention every price chart uses; a fixed amber line made direction
+  // unreadable at a glance, which is the one thing a price chart must convey.
+  const trend = function (vals) {
+    const clean = (vals || []).filter(function (v) { return v != null; });
+    if (clean.length < 2) return { line: '#8fa3bd', fill: 'rgba(143,163,189,.10)' };
+    const rising = clean[clean.length - 1] >= clean[0];
+    return rising
+      ? { line: '#2ee6a8', fill: 'rgba(46,230,168,.12)' }
+      : { line: '#a10000', fill: 'rgba(255,45,32,.12)' };
+  };
+
+  const pts = within(spot.points, SPOT_WINDOW);
+  $('spotSource').textContent = spot.source || 'connecting...';
+  $('spotAge').textContent = spot.price
+    ? '$' + Number(spot.price).toLocaleString() + '  Â·  ' + (spot.age_sec != null ? spot.age_sec.toFixed(1) + 's old' : '')
+    : 'no tick yet';
+  const pill = $('spotPill');
+  if (pill) {
+    pill.className = 'pill ' + (spot.fresh ? 'ok' : 'warn');
+    pill.textContent = spot.fresh ? 'live' : (spot.price ? 'stale' : 'waiting');
+  }
+  const spotTrend = trend(pts.map(function (p) { return p.p; }));
+  drawFeed('spotChart', pts.map(p => hhmmss(p.t)), [{
+    label: 'BTC-USD spot Â· 1 day', borderColor: spotTrend.line, backgroundColor: spotTrend.fill,
+    data: pts.map(p => p.p), tension: 0.2, fill: true, pointRadius: 0, borderWidth: 2,
+  }]);
+
+  const k = md.kalshi || {};
+  const kpts = within(md.series || [], K15_WINDOW);
+  const contract = k.market || null;
+  if (contract) $('k15Ticker').textContent = contract.ticker;
+  const kp = $('k15Pill');
+  if (kp) {
+    kp.className = 'pill ' + (contract ? 'ok' : 'warn');
+    kp.textContent = contract ? 'quoted' : 'no quote';
+  }
+  const set15 = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set15('k15Up', contract && contract.up_ask != null ? Math.round(contract.up_ask * 100) + 'Â¢' : '--');
+  set15('k15Down', contract && contract.down_ask != null ? Math.round(contract.down_ask * 100) + 'Â¢' : '--');
+  set15('k15Target', contract && contract.target != null ? '$' + Number(contract.target).toLocaleString() : '--');
+  // Countdown runs locally between polls so it ticks smoothly instead of
+  // jumping every five seconds.
+  if (contract && contract.close_time) {
+    DEADLINE = new Date(contract.close_time).getTime() / 1000;
+  }
+  tickClock();
+  $('k15Detail').textContent = contract
+    ? (contract.title || 'up or down') + ' Â· ' + (k.tradable || 0) + ' quotable of ' + (k.open_markets || 0)
+      + (k.error ? ' Â· ' + k.error : '')
+    : 'waiting for the next contract';
+  if (!contract && ctx_feed_error) {
+    $('k15Detail').textContent = 'feed offline â€” ' + ctx_feed_error;
+  }
+  const kTrend = trend(kpts.map(function (p) { return p.spot; }));
+  drawFeed('k15Chart', kpts.map(p => hhmmss(p.t)), [
+    {
+      label: 'spot Â· 15 min', borderColor: kTrend.line, backgroundColor: kTrend.fill,
+      data: kpts.map(p => p.spot), tension: 0.2, pointRadius: 0, borderWidth: 2, fill: true,
+    },
+    {
+      label: 'target', borderColor: '#8fa3bd', borderDash: [3, 3],
+      data: kpts.map(p => p.target), tension: 0, pointRadius: 0, borderWidth: 1.2,
+    },
+  ], { scales: { x: { ticks: { color: '#8494ab', maxTicksLimit: 4, font: { size: 11 } } },
+                  y: { ticks: { color: '#8494ab', font: { size: 11 } },
+                       // Spot and target are ~$84k; a zero-based axis would
+                       // flatten both into a single line.
+                       min: (function () {
+                         const vals = kpts.flatMap(p => [p.spot, p.target]).filter(v => v != null);
+                         return vals.length ? Math.min.apply(null, vals) - 40 : undefined;
+                       })(),
+                       max: (function () {
+                         const vals = kpts.flatMap(p => [p.spot, p.target]).filter(v => v != null);
+                         return vals.length ? Math.max.apply(null, vals) + 40 : undefined;
+                       })(),
+                  } } });
+
+  const lead = md.lead || {};
+  $('feedNote').textContent = lead.usable
+    ? 'streaming Â· ' + (lead.series || 'KXBTC15M') + ' live'
+    : (k.error ? 'streaming Â· Kalshi: ' + k.error : 'streaming');
+}
+
+let DEADLINE = 0;
+function tickClock() {
+  const el = $('k15Clock');
+  if (!el) return;
+  if (!DEADLINE) { el.textContent = '--'; return; }
+  const left = Math.max(0, DEADLINE - Date.now() / 1000);
+  const m = Math.floor(left / 60);
+  const s = Math.floor(left % 60);
+  el.textContent = m + ':' + String(s).padStart(2, '0');
+  el.className = left < 60 ? 'down' : '';
+}
+
+function paintAccount(a) {
+  if (!a) return;
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set('acctLabel', a.label);
+  set('acctEquity', money(a.equity));
+  set('acctWin', (a.today ? a.today.win_rate : 0) + '%');
+  set('acctOpen', a.open_positions);
+  set('acctFoot', 'cash ' + money(a.cash) + ' Â· ' + (a.today ? a.today.trades : 0) + ' trades today');
+  const pnl = $('acctToday');
+  const v = a.today ? a.today.pnl : 0;
+  if (pnl) {
+    pnl.textContent = money(v);
+    pnl.className = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
+  }
+  const pill = $('acctPill');
+  if (pill) {
+    pill.className = 'pill ' + (a.book === 'dry' ? 'ok' : 'warn');
+    pill.textContent = String(a.book || '').toUpperCase();
+  }
+  const curve = a.curve || { labels: [], pnl: [] };
+  drawFeed('accountChart', curve.labels, [{
+    label: "Today's P&L ($)", data: curve.pnl,
+    borderColor: (a.today && a.today.pnl > 0) ? '#2ee6a8' : ((a.today && a.today.pnl < 0) ? '#a30808' : '#4d9fff'),
+    backgroundColor: 'rgba(46,230,168,.10)', tension: 0.3, fill: true, pointRadius: 2,
+  }]);
+}
+
+async function refreshFeeds() {
+  try {
+    paintMarket(await fetch('/api/marketdata').then(r => r.json()));
+  } catch (_) { /* feed still starting */ }
+  try {
+    const d = await fetch('/api/accounts').then(r => r.json());
+    if (d.accounts) paintAccount(d.accounts[d.current]);
+  } catch (_) { /* ignore */ }
+}
+
+// --- strategy cards ---
+// Each card's curve is read from the server-rendered snapshot, so the grid is
+// populated on the first byte and does not depend on Chart.js loading.
+const sparks = {};
+function drawSparks(cards) {
+  if (typeof Chart === 'undefined') return;
+  (cards || SNAPSHOT.strategy_cards || []).forEach(c => {
+    const ctx = $('spark-' + c.name);
+    if (!ctx) return;
+    if (typeof Chart === 'undefined') return;
+    if (sparks[c.name]) sparks[c.name].destroy();
+    const flat = !(c.equity && c.equity.pnl.length);
+    sparks[c.name] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: flat ? ['no closed trades yet'] : c.equity.labels,
+        datasets: [{
+          label: 'Cumulative P&L ($)',
+          data: flat ? [0] : c.equity.pnl,
+          borderColor: c.realized > 0 ? '#2ee6a8' : (c.realized < 0 ? '#a30808' : '#4d9fff'),
+          backgroundColor: 'rgba(46,230,168,.08)',
+          tension: 0.3, fill: true, pointRadius: 0, borderWidth: 1.5,
+        }],
+      },
+      options: sparkOptions(),
+    });
+  });
+}
+function sparkOptions() {
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { title: it => it[0].label, label: it => '$' + it.parsed.y } },
+    },
+    scales: {
+      x: { display: false },
+      y: { ticks: { color: '#8494ab', maxTicksLimit: 3, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+    },
+  };
+}
+
+// --- strategy detail ---
+let detailChart = null;
+let openName = null;
+function cell(t, v, cls) { return '<td' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(v) + '</td>'; }
+
+async function openStrategy(name, keepScroll) {
+  openName = name;
+  const panel = $('detailPanel');
+  panel.style.display = '';
+  $('detailTitle').textContent = name;
+  $('detailState').textContent = 'loading...';
+  const r = await fetch('/api/strategy/' + encodeURIComponent(name));
+  const d = await r.json().catch(() => ({}));
+  if (d.error) {
+    $('detailState').textContent = '';
+    $('detailBody').innerHTML = '<div class="empty">' + esc(d.error) + '</div>';
+    return;
+  }
+  const s = d.strategy;
+  $('detailTitle').textContent = s.label;
+  $('detailState').textContent = s.running
+    ? 'running (pid ' + s.pid + ')'
+    : 'stopped';
+
+  const stat = (label, value, cls) =>
+    '<div class="cstats" style="grid-template-columns:repeat(auto-fit,minmax(88px,1fr));margin:0 0 12px">'
+    + '<div><b class="' + (cls || '') + '">' + value + '</b><span>' + label + '</span></div></div>';
+
+  let html = '<p style="color:var(--dim);font-size:12.5px;margin-bottom:10px">' + esc(s.description) + '</p>';
+  html += '<div class="bar" style="margin-bottom:12px"><span class="tag">python ' + esc(s.command) + '</span>'
+    + '<span class="tag">' + esc(d.book) + ' book</span>'
+    + '<span class="mono" style="color:var(--faint)">pid ' + (s.pid == null ? '-' : s.pid) + '</span></div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-bottom:14px">'
+    + stat('trades', s.trades)
+    + stat('realized', money(s.realized), s.realized > 0 ? 'up' : (s.realized < 0 ? 'down' : 'flat'))
+    + stat('win rate', s.win_rate + '%')
+    + stat('best', money(s.best), 'up')
+    + stat('worst', money(s.worst), 'down')
+    + stat('open', s.open_positions)
+    + stat('deployed', money(s.deployed))
+    + '</div>';
+  html += '<div style="height:190px;margin-bottom:14px"><canvas id="detailChart"></canvas></div>';
+
+  html += '<h3 style="font-size:12px;margin:0 0 6px">Open positions</h3>';
+  html += d.positions.length
+    ? '<table><thead><tr><th>Market</th><th>Title</th><th>Side</th><th>Entry</th><th>Qty</th><th>Stop</th><th>Target</th><th>Opened</th></tr></thead><tbody>'
+      + d.positions.map(p => '<tr>' + cell('', p.market_id, 'mono') + cell('', mktTitle(p.market_id)) + cell('', p.side) + cell('', money(p.entry_price))
+        + cell('', p.quantity) + cell('', p.stop_loss == null ? '-' : money(p.stop_loss))
+        + cell('', p.take_profit == null ? '-' : money(p.take_profit)) + cell('', p.opened, 'mono') + '</tr>').join('')
+      + '</tbody></table>'
+    : '<div class="empty">No open positions in this book.</div>';
+
+  html += '<h3 style="font-size:12px;margin:14px 0 6px">Closed trades</h3>';
+  html += d.trades.length
+    ? '<table><thead><tr><th>Market</th><th>Title</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&amp;L</th><th>Closed</th></tr></thead><tbody>'
+      + d.trades.map(t => '<tr>' + cell('', t.market_id, 'mono') + cell('', mktTitle(t.market_id)) + cell('', t.side) + cell('', money(t.entry_price))
+        + cell('', money(t.exit_price)) + cell('', t.quantity)
+        + cell('', money(t.pnl), t.pnl > 0 ? 'up' : (t.pnl < 0 ? 'down' : 'flat'))
+        + cell('', t.exit_timestamp, 'mono') + '</tr>').join('')
+      + '</tbody></table>'
+    : '<div class="empty">No closed trades yet for this strategy.</div>';
+
+  html += '<h3 style="font-size:12px;margin:14px 0 6px">Process log</h3>';
+  html += '<pre>' + esc((d.logs || []).join('\n') || 'No log yet. Start the strategy to generate one.') + '</pre>';
+  $('detailBody').innerHTML = html;
+
+  if (detailChart) detailChart.destroy();
+  const ctx = $('detailChart');
+  if (ctx && typeof Chart !== 'undefined') {
+    const eq = s.equity || { labels: [], pnl: [] };
+    const empty = !eq.pnl.length;
+    detailChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: empty ? ['no closed trades yet'] : eq.labels,
+        datasets: [{
+          label: 'Cumulative P&L ($)',
+          data: empty ? [0] : eq.pnl,
+          borderColor: s.realized > 0 ? '#2ee6a8' : (s.realized < 0 ? '#a30808' : '#4d9fff'),
+          backgroundColor: 'rgba(46,230,168,.10)',
+          tension: 0.3, fill: true, pointRadius: 2, borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { labels: { color: '#e6edf6', boxWidth: 10 } } },
+        scales: {
+          x: { ticks: { color: '#5b6a80', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,.04)' } },
+          y: { ticks: { color: '#5b6a80' }, grid: { color: 'rgba(255,255,255,.04)' } },
+        },
+      },
+    });
+  }
+  if (!keepScroll) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function closeStrategy() {
+  openName = null;
+  $('detailPanel').style.display = 'none';
+  if (detailChart) { detailChart.destroy(); detailChart = null; }
+}
+
+// ---------------------------------------------------------------------------
+// ANALYSIS OF - stats and recommendations over the forever trade log
+// ---------------------------------------------------------------------------
+const analysisChart = { current: null };
+let analysisReq = 0;
+
+function closeAnalysis() {
+  $('analysisPanel').style.display = 'none';
+  if (analysisChart.current) { analysisChart.current.destroy(); analysisChart.current = null; }
+}
+
+function _anStat(label, value, cls) {
+  return '<div><b class="' + (cls || '') + '">' + value + '</b><span>' + label + '</span></div>';
+}
+
+function _anTable(heads, rows) {
+  if (!rows || !rows.length) return '';
+  let h = '<table><thead><tr>' + heads.map(x => '<th>' + esc(x) + '</th>').join('') + '</tr></thead><tbody>';
+  for (const r of rows) {
+    h += '<tr>' + r.map(c => '<td' + (c.num ? ' class="num"' : '') + '>' + (c.raw ? c.v : esc(c.v)) + '</td>').join('') + '</tr>';
+  }
+  return h + '</tbody></table>';
+}
+
+async function showAnalysis(name) {
+  const req = ++analysisReq;
+  const panel = $('analysisPanel');
+  panel.style.display = '';
+  $('analysisTitle').textContent = 'ANALYSIS OF';
+  $('analysisScope').textContent = name
+    ? (name + ' - every closed trade, forever')
+    : ('all strategies - every closed trade, forever');
+  $('analysisBody').innerHTML = '<div class="empty">Loading analysis&hellip;</div>';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const url = name
+    ? '/api/strategy/' + encodeURIComponent(name) + '/analysis'
+    : '/api/analysis';
+  const r = await fetch(url);
+  const a = await r.json().catch(() => ({}));
+  if (req !== analysisReq) return; // a newer analysis replaced this one
+  if (a.error) {
+    $('analysisBody').innerHTML = '<div class="empty">' + esc(a.error) + '</div>';
+    return;
+  }
+  const pnlCls = a.total_pnl > 0 ? 'up' : (a.total_pnl < 0 ? 'down' : 'flat');
+  let html = '<div class="cstats" style="grid-template-columns:repeat(auto-fit,minmax(92px,1fr))">'
+    + _anStat('closed trades', a.trades)
+    + _anStat('win rate', a.win_rate + '%')
+    + _anStat('total P&L', money(a.total_pnl), pnlCls)
+    + _anStat('avg P&L', money(a.avg_pnl), a.avg_pnl > 0 ? 'up' : (a.avg_pnl < 0 ? 'down' : 'flat'))
+    + _anStat('best', money(a.best), 'up')
+    + _anStat('worst', money(a.worst), 'down')
+    + '</div>';
+
+  html += '<h3 style="font-size:12px;margin:14px 0 6px">Recommendations</h3><ul class="recs">'
+    + a.recommendations.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>';
+
+  html += '<h3 style="font-size:12px;margin:14px 0 6px">By strategy</h3>'
+    + _anTable(['Strategy', 'Trades', 'Win rate', 'P&L'],
+      (a.by_strategy || []).map(r => [
+        { v: r.strategy }, { v: r.trades, num: true },
+        { v: r.win_rate + '%', num: true },
+        { v: money(r.pnl), num: true, raw: '<span class="' + (r.pnl > 0 ? 'up' : (r.pnl < 0 ? 'down' : 'flat')) + '">' + money(r.pnl) + '</span>' },
+      ]));
+
+  html += '<div class="row two" style="padding:0;margin-top:8px">'
+    + '<div><h3 style="font-size:12px;margin:0 0 6px">By side</h3>'
+    + _anTable(['Side', 'Trades', 'Win rate', 'P&L'],
+      (a.by_side || []).map(r => [
+        { v: r.side }, { v: r.trades, num: true },
+        { v: r.win_rate + '%', num: true },
+        { v: money(r.pnl), num: true },
+      ])) + '</div>'
+    + '<div><h3 style="font-size:12px;margin:0 0 6px">By entry price</h3>'
+    + _anTable(['Band', 'Trades', 'Win rate', 'P&L'],
+      (a.by_price_band || []).map(r => [
+        { v: r.band }, { v: r.trades, num: true },
+        { v: r.win_rate + '%', num: true },
+        { v: money(r.pnl), num: true },
+      ])) + '</div></div>';
+
+  if (a.by_hour && a.by_hour.length) {
+    html += '<h3 style="font-size:12px;margin:14px 0 6px">By hour of exit</h3>'
+      + _anTable(['Hour', 'Trades', 'Win rate', 'P&L'],
+        a.by_hour.map(r => [
+          { v: r.hour }, { v: r.trades, num: true },
+          { v: r.win_rate + '%', num: true },
+          { v: money(r.pnl), num: true },
+        ]));
+  }
+  if (a.by_exit_reason && a.by_exit_reason.length) {
+    html += '<h3 style="font-size:12px;margin:14px 0 6px">By exit reason</h3>'
+      + _anTable(['Reason', 'Trades'], a.by_exit_reason.map(r => [{ v: r.reason }, { v: r.trades, num: true }]));
+  }
+  if (a.hold_seconds_avg_win || a.hold_seconds_avg_loss) {
+    html += '<p class="note" style="margin-top:10px;color:var(--dim)">Average hold: winners '
+      + Math.round(a.hold_seconds_avg_win / 60) + 'm, losers '
+      + Math.round(a.hold_seconds_avg_loss / 60) + 'm.</p>';
+  }
+  $('analysisBody').innerHTML = html;
+}
+
+async function startAll() {
+  // Start only what is STOPPED. toggleStrategy TOGGLES, so
+  // feeding it a running strategy would STOP it - the exact
+  // opposite of "Start all". Running lanes are left alone.
+  const names = (SNAPSHOT.strategy_cards || []).filter(c => !c.running).map(c => c.name);
+  const btn = document.getElementById('startAllBtn');
+  if (btn) {
+    btn.classList.add('loading');
+    btn.classList.add('yellow');
+  }
+  
+  try {
+    if (!names.length) {
+      note('start all: everything is already running');
+      return;
+    }
+    if ((SNAPSHOT.mode && SNAPSHOT.mode.mode) === 'live') {
+      // Popup approval auto-granted: button is law, always continue.
+      // (Previously: confirm dialog blocked live starts forever.)
+      console.log('LIVE MODE approved: starting ' + names.length + ' strategies');
+    }
+    
+    // Start the stopped strategies
+    for (const n of names) await toggleStrategy(n, true, true);
+    
+    // Poll until all are actually running
+    let maxWait = 120; // 60 seconds
+    let pollCount = 0;
+    while (pollCount < maxWait) {
+      await new Promise(r => setTimeout(r, 500));
+      pollCount++;
+      
+      try {
+        const strategiesResp = await fetch('/api/strategies', { headers: authHeaders() });
+        const strategiesData = await strategiesResp.json().catch(() => ({}));
+        const allRunning = names.every(n => strategiesData[n] && strategiesData[n].running);
+        
+        if (allRunning) {
+          note('started: ' + names.join(', '));
+          break;
+        }
+      } catch (e) {}
+    }
+  } finally {
+    if (btn) {
+      btn.classList.remove('loading');
+      btn.classList.remove('yellow');
+    }
+  }
+}
+
+async function startAllLive() {
+  const btn = document.getElementById('startAllLiveBtn');
+  if (btn) { btn.classList.add('loading'); btn.classList.add('yellow'); }
+  
+  try {
+    // 1. Switch engine to LIVE mode
+    const modeResp = await fetch('/api/mode', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ mode: 'live' })
+    });
+    const modeData = await modeResp.json().catch(() => ({}));
+    if (!modeResp.ok) {
+      note('mode switch failed: ' + (modeData.error || 'unknown'));
+      return;
+    }
+    note('engine switched to LIVE mode');
+    
+    // 2. Start all stopped lanes
+    const names = (SNAPSHOT.strategy_cards || []).filter(c => !c.running).map(c => c.name);
+    if (!names.length) {
+      note('all lanes already running');
+      return;
+    }
+    
+    for (const n of names) await toggleStrategy(n, true, true);
+    
+    // Poll until all are running
+    let pollCount = 0;
+    while (pollCount < 120) {
+      await new Promise(r => setTimeout(r, 500));
+      pollCount++;
+      try {
+        const s = await (await fetch('/api/strategies', { headers: authHeaders() })).json().catch(() => ({}));
+        if (names.every(n => s[n] && s[n].running)) { note('LIVE started: ' + names.join(', ')); break; }
+      } catch (e) {}
+    }
+  } finally {
+    if (btn) { btn.classList.remove('loading'); btn.classList.remove('yellow'); }
+  }
+}
+
+async function stopAll() {
+  const names = (SNAPSHOT.strategy_cards || []).filter(c => c.running).map(c => c.name);
+  
+  // Find the "Stop all" button (not the LIVE kill button) - it says "Stop all" onclick
+  const stopAllBtn = Array.from(document.querySelectorAll('button')).find(b => 
+    b.textContent.trim() === 'Stop all' && b.onclick.toString().includes('stopAll')
+  );
+  
+  // Apply yellow spinner to STOP ALL button
+  if (stopAllBtn) {
+    stopAllBtn.classList.add('loading');
+    stopAllBtn.classList.add('yellow');
+  }
+  
+  try {
+    for (const n of names) await toggleStrategy(n, true, false);
+    
+    // Poll until all are actually stopped
+    let maxWait = 120;
+    let pollCount = 0;
+    while (pollCount < maxWait) {
+      await new Promise(r => setTimeout(r, 500));
+      pollCount++;
+      
+      try {
+        const strategiesResp = await fetch('/api/strategies', { headers: authHeaders() });
+        const strategiesData = await strategiesResp.json().catch(() => ({}));
+        const allStopped = names.every(n => strategiesData[n] && !strategiesData[n].running);
+        
+        if (allStopped) {
+          note('stopped: ' + (names.join(', ') || 'nothing was running'));
+          break;
+        }
+      } catch (e) {}
+    }
+  } finally {
+    if (stopAllBtn) {
+      stopAllBtn.classList.remove('loading');
+      stopAllBtn.classList.remove('yellow');
+    }
+  }
+}
+
+// Kill all: the emergency button. Unlike Stop all (a graceful
+// SIGTERM that lets a cycle finish), Kill all hard-kills every
+// running process in the book the page is in, right now, and
+// records an operator stop so neither supervisor resurrects a
+// killed lane. The button is law: killed lanes stay down until
+// Start is pressed here again.
+// Collapse the live feed panel. It is tall and its numbers tick continuously,
+// so it earns the right to be folded away once you have read it.
+function toggleFeeds() {
+  const body = $('feedsBody');
+  const label = $('feedToggle');
+  if (!body) return;
+  const nowHidden = body.style.display === 'none';
+  body.style.display = nowHidden ? '' : 'none';
+  if (label) label.textContent = nowHidden ? 'hide' : 'show';
+  try { localStorage.setItem('feedsHidden', nowHidden ? '0' : '1'); } catch (e) {}
+}
+(function restoreFeeds() {
+  let hidden = null;
+  try { hidden = localStorage.getItem('feedsHidden'); } catch (e) {}
+  if (hidden === '1') {
+    const body = $('feedsBody');
+    const label = $('feedToggle');
+    if (body) body.style.display = 'none';
+    if (label) label.textContent = 'show';
+  }
+})();
+
+// --- init ---
+// Live data first, and never let a chart library take the page down with it.
+//
+// Chart.js comes from a CDN. If that request is slow, blocked by a proxy or an
+// ad blocker, or simply offline, `Chart` is undefined and the first `new Chart`
+// threw - which aborted this whole script *before* the feed polling below was
+// registered. The result was a page whose prices stayed on their hardcoded
+// "connecting..." / "--" defaults forever even though /api/marketdata was
+// serving live data the whole time.
+//
+// So: register the pollers first, make every chart call conditional, and run
+// the renderers independently so one failure cannot silence the rest.
+const CHARTS_OK = typeof Chart !== 'undefined';
+if (!CHARTS_OK) {
+  console.warn('Chart.js unavailable - charts disabled, live data still updating.');
+}
+function safeDraw(fn, label) {
+  if (!CHARTS_OK) return;
+  try { fn(); } catch (e) { console.warn('chart ' + label + ' failed', e); }
+}
+function safeRun(fn, label) {
+  try { fn(); } catch (e) { console.warn(label + ' failed', e); }
+}
+
+// Pollers are registered before anything can throw.
+setInterval(refresh, 30000);
+setInterval(loadLogs, 30000);
+setInterval(refreshFeeds, 5000);
+setInterval(tickClock, 500);
+
+safeDraw(drawChart, 'account');
+safeDraw(drawSparks, 'sparks');
+// initial market paint driven by refresh()
+safeRun(() => paintAccount(SNAPSHOT.accounts.live), 'paintAccount');
+safeRun(loadLogs, 'loadLogs');
+
+safeRun(refresh, 'refresh');
+safeRun(refreshFeeds, 'refreshFeeds');
+  <!-- ALL NO MARKETS section is now integrated into the main dashboard -->
+  <div class="panel all-no-panel">
+    <div class="ph">
+      <h2>ALL NO MARKETS</h2>
+      <span class="note">NO side only, maker entries, read-only &middot; every row below is a *NO* LANE contract entered with a resting limit order at the side's bid</span>
+      <div class="tools">
+        <input id="noFilter" type="text" placeholder="filter market / strategy" onkeyup="filterRows('noFilter','noBody')">
+        <button onclick="clearFilter('noFilter','noBody')">clear</button>
+      </div>
+    </div>
+    <div class="pb">
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Market</th>
+              <th>Strategy</th>
+              <th>Side</th>
+              <th class="num">Limit entry</th>
+              <th class="num">Qty</th>
+              <th class="num">Cost</th>
+              <th class="num">Model fair</th>
+              <th class="num">Edge</th>
+              <th class="num">Kelly f*</th>
+              <th class="num">Stop</th>
+              <th class="num">Take profit</th>
+              <th class="num">Conf</th>
+              <th>Expiration</th>
+              <th>Status</th>
+              <th>Book</th>
+              <th>Opened (UTC)</th>
+            </tr>
+          </thead>
+          <tbody id="noBody">
+            
+            <tr><td colspan="17" class="empty">No open *NO* LANE positions in this book &mdash; the up/down lanes keep their own clips, and this book has not placed one yet.</td></tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p>Kalshi-Frigo Trading Dashboard &middot; ALL NO MARKETS are integrated into the main dashboard at the bottom</p>
+  </footer>
+</div>
+</body>
+</html>

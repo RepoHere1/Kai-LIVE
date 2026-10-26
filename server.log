@@ -1,0 +1,7 @@
+Kai-Mirror listening on http://127.0.0.1:8787/
+  kalshi live  : https://api.elections.kalshi.com/trade-api/v2
+  kalshi demo  : https://demo-api.kalshi.co/trade-api/v2 (fallback)
+  spot         : Coinbase Exchange public ticker
+  llm          : https://ai-gateway.kilo.ai/api/v1 model kilo-auto/free
+# free-tier fallback chain (all verified 200 with a $0 balance)
+  mode         : dry | dry cash 4252.44 | dry balance 300
