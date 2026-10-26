@@ -1,13 +1,13 @@
 <#
   Kai-LIVE (LIVE-only) control script.
-    .\kai-live.ps1 start     start the LIVE server (port 8788, real trading)
-    .\kai-live.ps1 stop      stop the LIVE server
-    .\kai-live.ps1 restart   stop then start
-    .\kai-live.ps1 status    is it up, what cash, lane count
-    .\kai-live.ps1 on        start every trading lane (LIVE)
-    .\kai-live.ps1 off       stop every trading lane
-    .\kai-live.ps1 logs      tail the server log
-  Shortcut: .\kai-live.cmd start   (same thing)
+    .\kai.ps1 start     start the LIVE server (port 8788, real trading)
+    .\kai.ps1 stop      stop the LIVE server
+    .\kai.ps1 restart   stop then start
+    .\kai.ps1 status    is it up, what cash, lane count
+    .\kai.ps1 on        start every trading lane (LIVE)
+    .\kai.ps1 off       stop every trading lane
+    .\kai.ps1 logs      tail the server log
+  Shortcut: .\kai.cmd start   (same thing)
 #>
 param(
   [Parameter(Position = 0)][string]$Action = 'status'
@@ -15,9 +15,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PidFile = Join-Path $Here 'kai-live.pid'
-$LogFile = Join-Path $Here 'server-live.log'
-$ErrFile = Join-Path $Here 'server-live.err'
+$PidFile = Join-Path $Here 'kai.pid'
+$LogFile = Join-Path $Here 'server.log'
+$ErrFile = Join-Path $Here 'server.err'
 $Base    = 'http://127.0.0.1:8788'
 $Mode    = 'LIVE'
 $Node    = (Get-Command node -ErrorAction SilentlyContinue).Source
@@ -98,7 +98,7 @@ function Show-Status {
 
 function Set-Lanes([bool]$want) {
   $h = Test-KaiLivePort
-  if (-not $h) { Write-Host 'LIVE server is down - run: .\kai-live.ps1 start' -ForegroundColor Red; return }
+  if (-not $h) { Write-Host 'LIVE server is down - run: .\kai.ps1 start' -ForegroundColor Red; return }
   $s = (Invoke-WebRequest -Uri ($Base + '/api/strategies') -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
   $changed = 0
   foreach ($prop in $s.PSObject.Properties) {
@@ -119,5 +119,5 @@ switch ($Action.ToLower()) {
   'on'      { Set-Lanes $true }
   'off'     { Set-Lanes $false }
   'logs'    { if (Test-Path $LogFile) { Get-Content $LogFile -Tail 40 } else { Write-Host 'no log yet' } }
-  'default' { Write-Host 'usage: .\kai-live.ps1 [start|stop|restart|status|on|off|logs]' }
+  'default' { Write-Host 'usage: .\kai.ps1 [start|stop|restart|status|on|off|logs]' }
 }

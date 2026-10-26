@@ -1,0 +1,7 @@
+.env
+node_modules/
+*.log
+*.err
+*.pid
+state.json
+.DS_Store

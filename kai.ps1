@@ -1,11 +1,10 @@
 <#
-  Kai-Mirror control script.
-    .\kai.ps1 start     start the server (dashboard + Kalshi/Coinbase/Kilo bridge)
-    .\kai.ps1 stop      stop the server
+  Kai-LIVE (LIVE-only) control script.
+    .\kai.ps1 start     start the LIVE server (port 8788, real trading)
+    .\kai.ps1 stop      stop the LIVE server
     .\kai.ps1 restart   stop then start
-    .\kai.ps1 status    is it up, what mode, dry cash, lane count
-    .\kai.ps1 reset     wipe the DRY book back to a clean $300 / zero trades
-    .\kai.ps1 on        start every trading lane (paper)
+    .\kai.ps1 status    is it up, what cash, lane count
+    .\kai.ps1 on        start every trading lane (LIVE)
     .\kai.ps1 off       stop every trading lane
     .\kai.ps1 logs      tail the server log
   Shortcut: .\kai.cmd start   (same thing)
@@ -19,11 +18,12 @@ $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PidFile = Join-Path $Here 'kai.pid'
 $LogFile = Join-Path $Here 'server.log'
 $ErrFile = Join-Path $Here 'server.err'
-$Base    = 'http://127.0.0.1:8787'
+$Base    = 'http://127.0.0.1:8788'
+$Mode    = 'LIVE'
 $Node    = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) { $Node = 'C:\Program Files\nodejs\node.exe' }
 
-function Get-KaiProcess {
+function Get-KaiLiveProcess {
   if (-not (Test-Path $PidFile)) { return $null }
   $raw = Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $raw) { return $null }
@@ -32,7 +32,7 @@ function Get-KaiProcess {
   return $null
 }
 
-function Test-KaiPort {
+function Test-KaiLivePort {
   try {
     $r = Invoke-WebRequest -Uri ($Base + '/api/health') -UseBasicParsing -TimeoutSec 3
     if ($r.StatusCode -eq 200) { return ($r.Content | ConvertFrom-Json) }
@@ -40,19 +40,19 @@ function Test-KaiPort {
   return $null
 }
 
-function Start-Kai {
-  if (Get-KaiProcess) { Write-Host 'already running (pid ' + (Get-KaiProcess).Id + ')' -ForegroundColor Yellow; return }
-  if (Test-KaiPort) { Write-Host 'a Kai-Mirror server is already answering on ' + $Base -ForegroundColor Yellow; return }
-  Write-Host 'starting Kai-Mirror...' -ForegroundColor Cyan
+function Start-KaiLive {
+  if (Get-KaiLiveProcess) { Write-Host 'already running (pid ' + (Get-KaiLiveProcess).Id + ')' -ForegroundColor Yellow; return }
+  if (Test-KaiLivePort) { Write-Host 'a Kai-LIVE server is already answering on ' + $Base -ForegroundColor Yellow; return }
+  Write-Host 'starting Kai-LIVE (LIVE, port 8788)...' -ForegroundColor Red
   $p = Start-Process -FilePath $Node -ArgumentList 'server.js' -WorkingDirectory $Here `
     -WindowStyle Hidden -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
   Set-Content -Path $PidFile -Value $p.Id -Encoding ascii
   for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Milliseconds 500
-    $h = Test-KaiPort
+    $h = Test-KaiLivePort
     if ($h) {
-      Write-Host ('up  pid ' + $p.Id + '  mode ' + $h.mode + '  dry cash $' + [Math]::Round($h.dry_balance, 2)) -ForegroundColor Green
-      Write-Host ('open  ' + $Base + '/') -ForegroundColor Green
+      Write-Host ('✓ LIVE  pid ' + $p.Id + '  cash $' + [Math]::Round($h.live_balance, 2)) -ForegroundColor Red
+      Write-Host ('open  ' + $Base + '/') -ForegroundColor Red
       return
     }
     if ($p.HasExited) {
@@ -65,11 +65,10 @@ function Start-Kai {
   Write-Host 'timed out waiting for ' + $Base -ForegroundColor Red
 }
 
-function Stop-Kai {
-  $p = Get-KaiProcess
+function Stop-KaiLive {
+  $p = Get-KaiLiveProcess
   if (-not $p) { Write-Host 'not running' -ForegroundColor Yellow; Remove-Item $PidFile -ErrorAction SilentlyContinue; return }
-  Write-Host ('stopping pid ' + $p.Id) -ForegroundColor Cyan
-  # kill the whole tree so no node child survives
+  Write-Host ('stopping Kai-LIVE LIVE pid ' + $p.Id) -ForegroundColor Red
   & taskkill.exe /PID $p.Id /T /F | Out-Null
   Start-Sleep -Milliseconds 800
   $left = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
@@ -79,15 +78,13 @@ function Stop-Kai {
 }
 
 function Show-Status {
-  $h = Test-KaiPort
-  $p = Get-KaiProcess
+  $h = Test-KaiLivePort
+  $p = Get-KaiLiveProcess
   if (-not $h) { Write-Host 'DOWN' -ForegroundColor Red; if ($p) { Write-Host ('stale pid file: ' + $p.Id) }; return }
-  Write-Host 'UP' -ForegroundColor Green
+  Write-Host 'UP (LIVE mode, port 8788, REAL TRADING)' -ForegroundColor Red
   Write-Host ('  pid        : ' + $(if ($p) { $p.Id } else { '(not tracked)' }))
-  Write-Host ('  mode       : ' + $h.mode)
-  Write-Host ('  dry cash   : $' + [Math]::Round($h.dry_balance, 2))
-  Write-Host ('  kalshi live: ' + $h.hosts.kalshi_live)
-  Write-Host ('  kalshi demo: ' + $h.hosts.kalshi_demo + '  (fallback)')
+  Write-Host ('  live cash  : $' + [Math]::Round($h.live_balance, 2))
+  Write-Host ('  kalshi     : ' + $h.hosts.kalshi_live + ' (live), ' + $h.hosts.kalshi_demo + ' (fallback)')
   Write-Host ('  spot       : ' + $h.hosts.spot)
   Write-Host ('  llm        : ' + $h.hosts.llm)
   Write-Host ('  uptime     : ' + [Math]::Round($h.uptime_sec / 60, 1) + ' min')
@@ -99,20 +96,9 @@ function Show-Status {
   Write-Host ('  open       : ' + $Base + '/')
 }
 
-function Reset-Dry {
-  Stop-Kai
-  $state = Join-Path $Here 'state.json'
-  if (Test-Path $state) { Remove-Item $state -Force; Write-Host 'removed state.json (old dry book)' -ForegroundColor Cyan }
-  Get-ChildItem $Here -Filter 'state.json.*' -ErrorAction SilentlyContinue | Remove-Item -Force
-  Start-Kai
-  Set-Lanes $false   # a clean book starts with nothing trading
-  $h = Test-KaiPort
-  if ($h) { Write-Host ('dry book reset: cash $' + [Math]::Round($h.dry_balance, 2) + ', 0 trades, 0 lanes running') -ForegroundColor Green }
-}
-
 function Set-Lanes([bool]$want) {
-  $h = Test-KaiPort
-  if (-not $h) { Write-Host 'server is down - run: .\kai.ps1 start' -ForegroundColor Red; return }
+  $h = Test-KaiLivePort
+  if (-not $h) { Write-Host 'LIVE server is down - run: .\kai.ps1 start' -ForegroundColor Red; return }
   $s = (Invoke-WebRequest -Uri ($Base + '/api/strategies') -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
   $changed = 0
   foreach ($prop in $s.PSObject.Properties) {
@@ -122,31 +108,16 @@ function Set-Lanes([bool]$want) {
       $changed++
     }
   }
-  Write-Host (($(if ($want) { 'started' } else { 'stopped' })) + ' ' + $changed + ' lane(s)') -ForegroundColor Green
-}
-
-function Set-Lanes-Live {
-  $h = Test-KaiPort
-  if (-not $h) { Write-Host 'server is down - run: .\kai.ps1 start' -ForegroundColor Red; return }
-  # Switch engine to LIVE mode
-  $modeResp = Invoke-WebRequest -Uri ($Base + '/api/mode') -Method POST -UseBasicParsing -TimeoutSec 5 `
-    -ContentType 'application/json' -Body '{"mode":"live"}'
-  $modeData = $modeResp.Content | ConvertFrom-Json
-  if (-not $modeData.ok) { Write-Host 'mode switch failed: ' + $modeData.error -ForegroundColor Red; return }
-  Write-Host 'engine switched to LIVE mode' -ForegroundColor Cyan
-  # Start all stopped lanes
-  Set-Lanes $true
+  Write-Host (($(if ($want) { 'started' } else { 'stopped' })) + ' ' + $changed + ' lane(s) in LIVE mode') -ForegroundColor Red
 }
 
 switch ($Action.ToLower()) {
-  'start'   { Start-Kai }
-  'stop'    { Stop-Kai }
-  'restart' { Stop-Kai; Start-Kai }
+  'start'   { Start-KaiLive }
+  'stop'    { Stop-KaiLive }
+  'restart' { Stop-KaiLive; Start-KaiLive }
   'status'  { Show-Status }
-  'reset'   { Reset-Dry }
   'on'      { Set-Lanes $true }
-  'onlive'  { Set-Lanes-Live }
   'off'     { Set-Lanes $false }
   'logs'    { if (Test-Path $LogFile) { Get-Content $LogFile -Tail 40 } else { Write-Host 'no log yet' } }
-  'default' { Write-Host 'usage: .\kai.ps1 [start|stop|restart|status|reset|on|onlive|off|logs]' }
+  'default' { Write-Host 'usage: .\kai.ps1 [start|stop|restart|status|on|off|logs]' }
 }

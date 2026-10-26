@@ -19,7 +19,7 @@ const path = require('path');
 const crypto = require('crypto');
 const kalshi = require('./kalshi');
 const kilo = require('./kilo');
-const brain = require('./brain');
+const brain = require('./brain_live');
 
 const HERE = __dirname;
 const ENV = kalshi.ENV;
@@ -50,12 +50,10 @@ const LANE_BY_NAME = new Map(LANES.map(l => [l.name, l]));
 // ---------------------------------------------------------------------------
 const STATE_FILE = path.join(HERE, 'state.json');
 function defaultState() {
-  const start = Number(ENV.DRY_START_BALANCE || 300);
   const allNoStart = 250;
   return {
     mode: 'live',  // LIVE server: start in LIVE mode
     no_lanes_enabled: true,
-    dry: { starting_balance: start, baseline: start, positions: [], closed: [], real_started: true },
     all_no: {
       dry: { starting_balance: allNoStart, balance: allNoStart, positions: [], closed_trades: [], total_pnl: 0, entries: 0 },
       live: { starting_balance: allNoStart, balance: allNoStart, positions: [], closed_trades: [], total_pnl: 0, entries: 0 },
@@ -316,8 +314,8 @@ function liveAccountPayload() {
   const closed = state.live.closed;
   const wins = closed.filter(t => t.pnl > 0).length;
   return {
-    book: 'dry',
-    label: 'DRY account - simulated money',
+    book: 'live',
+    label: 'LIVE account - real money',
     starting_balance: state.live.starting_balance,
     baseline: state.live.baseline,
     cash: liveCash(),
@@ -429,12 +427,9 @@ async function markLivePositions() {
 }
 
 
-async function markPositions() { return; }
-
 async function engineTick() {
   await markLivePositions();
-  if (state.mode === 'live') await markLivePositions();
-  const list = LANES.filter(l => l.name !== 'all_no_markets');
+  const list = LANES.filter(l => true);
   for (const lane of list) {
     const ls = laneState(lane.name);
     if (!ls.running) continue;
@@ -673,25 +668,17 @@ function tradesStats() {
 }
 
 function modePayload(book) {
-  const dry = liveAccountPayload();
   const live = liveCache.balance ? liveAccountPayload() : null;
-  const b = book || state.mode || 'dry';
+  const b = 'live';  // Kai-LIVE is LIVE-only: the mode never changes.
   return {
     mode: b,
-    dry: {
-      cash: dry.cash, open_positions: dry.open_positions, total_pnl: dry.total_pnl,
-      win_rate: dry.win_rate, starting_balance: dry.starting_balance, equity: dry.equity,
-      realized: dry.realized, exposure: dry.exposure, closed_trades: dry.closed_trades,
-    },
     live: live ? {
       cash: live.cash, open_positions: live.open_positions, total_pnl: live.total_pnl,
       portfolio_value: live.portfolio_value, equity: live.equity, realized: live.realized,
       exposure: live.exposure, closed_trades: live.closed_trades, error: live.error,
     } : null,
-    open_dry: { capital: dry.exposure, positions: dry.open_positions },
-    funding: { balance: b === 'live' ? (live ? live.cash : null) : dry.cash },
+    funding: { balance: live ? live.cash : null },
     no_lanes_enabled: !!state.no_lanes_enabled,
-    dry_full: dry,
     live_full: live,
   };
 }
@@ -747,26 +734,21 @@ function rememberTitles(lanes) {
 }
 
 function snapshotPayload(book) {
-  const b = book || state.mode || 'dry';
-  const dry = liveAccountPayload();
+  const b = 'live';  // Kai-LIVE is LIVE-only: the mode never changes.
   const live = liveAccountPayload();
-  const active = b === 'live' ? live : dry;
   const prov = lastProvenance();
   return {
     book: b,
     mode: modePayload(b),
     balance: live.cash,
     kalshi_age_sec: liveCache.at ? Math.round((Date.now() - liveCache.at) / 1000) : null,
-    accounts: { dry, live },
+    accounts: { live },
     current: b,
-    equity: active.curve,
-    positions: b === 'live' ? livePositions() : state.live.positions.map(p => ({
-      market_id: p.market_id, side: p.side, entry_price: p.entry_price, quantity: p.qty,
-      strategy: p.strategy, stop_loss: p.stop_loss, take_profit: p.take_profit, opened: p.opened,
-    })),
+    equity: live.curve,
+    positions: livePositions(),
     strategy_cards: cards(),
     trades: tradesStats(),
-    data: { dry: { win_rate: dry.win_rate }, ai_cost_today: 0 },
+    data: { live: { win_rate: live.win_rate }, ai_cost_today: 0 },
     kalshi: kalshiBlock(b),
     market_titles: TITLES,
     no_lanes_enabled: !!state.no_lanes_enabled,
@@ -809,8 +791,9 @@ function lastProvenance() {
 // ---------------------------------------------------------------------------
 function getAllNoBook() {
   // Return current ALL NO book state (open positions + closed trades + tallies)
-  // The NO book is a simulated book: it always runs in its own dry ledger.
-  const mode = 'dry';
+  // The NO book runs in its own ledger: state.all_no['dry'] for paper DRY,
+  // state.all_no['live'] for real-money LIVE.
+  const mode = state.mode;
   const book = state.all_no[mode] || { starting_balance: 250, balance: 250, positions: [], closed_trades: [], total_pnl: 0, entries: 0 };
   
   // Calculate tallies from closed trades
@@ -935,15 +918,15 @@ async function noBook() {
 // ALL NO MARKETS - Entry/Exit Trade Functions
 // ---------------------------------------------------------------------------
 function createAllNoEntry(market_id, entry_price, quantity, fair_at_entry, edge, kelly, stop_loss, take_profit, confidence, expiration) {
-  const mode = 'dry';
+  const mode = state.mode;
   const book = state.all_no[mode];
-  if (!book) return { error: 'Book not found' };
-  
+  if (!book) return { error: 'Book not found for mode: ' + mode };
+
   const cost = Number((entry_price * quantity).toFixed(2));
   if (book.balance < cost) {
     return { error: 'Insufficient balance: need ' + cost.toFixed(2) + ', have ' + book.balance.toFixed(2) };
   }
-  
+
   const id = market_id + '-' + Date.now();
   const position = {
     id,
@@ -962,32 +945,37 @@ function createAllNoEntry(market_id, entry_price, quantity, fair_at_entry, edge,
     status: 'resting',
     opened_at: new Date().toISOString(),
   };
-  
-  // Deduct cost from balance and record entry
+
+  // Track locally first
   book.balance -= cost;
   book.positions.push(position);
   book.entries++;
   save();
-  log('all_no_entry', { id, market_id, entry_price, quantity, cost, balance_after: book.balance });
-  
+
+  // In LIVE mode, also post a real Kalshi NO-side order so the ledger and the
+  // Kalshi book agree. DRY mode stays a pure paper book.
+  if (state.mode === 'live') {
+    postAllNoOrder(position, 'enter');
+  }
+
   return { ok: true, position, balance: book.balance };
 }
 
 function closeAllNoPosition(position_id, exit_price, exit_reason) {
-  const mode = 'dry';
+  const mode = state.mode;
   const book = state.all_no[mode];
-  if (!book) return { error: 'Book not found' };
-  
+  if (!book) return { error: 'Book not found for mode: ' + mode };
+
   const idx = book.positions.findIndex(p => p.id === position_id);
   if (idx === -1) return { error: 'Position not found' };
-  
+
   const pos = book.positions[idx];
   const proceeds = Number((pos.quantity * exit_price).toFixed(2));
   const pnl = Number((proceeds - pos.cost).toFixed(2));
   const roi = pos.cost > 0 ? Number(((pnl / pos.cost) * 100).toFixed(1)) : 0;
   const fee_paid = Number((proceeds * 0.0175).toFixed(3)); // 1.75% maker fee
   const net_pnl = Number((pnl - fee_paid).toFixed(2));
-  
+
   const trade = {
     id: pos.id,
     market_id: pos.market_id,
@@ -1006,7 +994,7 @@ function closeAllNoPosition(position_id, exit_price, exit_reason) {
     opened_at: pos.opened_at,
     closed_at: new Date().toISOString(),
   };
-  
+
   // Update book
   book.positions.splice(idx, 1);
   book.closed_trades.push(trade);
@@ -1014,13 +1002,54 @@ function closeAllNoPosition(position_id, exit_price, exit_reason) {
   book.total_pnl += net_pnl;
   save();
   log('all_no_exit', { id: pos.id, market_id: pos.market_id, entry: pos.entry_price, exit: exit_price, pnl: net_pnl, balance_after: book.balance });
-  
+
+  // In LIVE mode, also post a real Kalshi NO-side exit order
+  if (state.mode === 'live') {
+    postAllNoOrder(pos, 'exit', exit_price);
+  }
+
   return { ok: true, trade, balance: book.balance, pnl: net_pnl };
 }
 
 function strategyForSeries(series) {
   const lane = LANES.find(l => (l.seriesList || []).includes(series));
   return lane ? lane.name : 'unmapped';
+}
+
+// ---------------------------------------------------------------------------
+// ALL NO MARKETS - Kalshi order placement (LIVE mode only)
+// ---------------------------------------------------------------------------
+async function postAllNoOrder(position, action, exit_price) {
+  // Post a real Kalshi NO-side order for the ALL NO MARKETS book.
+  // LIVE mode: real money. DRY mode: never called (book is paper-only).
+  if (state.mode !== 'live') return null;
+  try {
+    const side = 'NO';
+    const qty = position.quantity;
+    const price = action === 'enter' ? position.entry_price : exit_price;
+    const expiration = position.expiration;
+    const marker = crypto.randomBytes(6).toString('hex');
+    const route = '/portfolio/orders';
+    const body = JSON.stringify({
+      marker,
+      side,
+      quantity: qty,
+      price: price,
+      expiration,
+      option_type: 'binary',
+      taker: side,
+    });
+    const ts = Math.round(Date.now() / 1000);
+    const method = 'POST';
+    const fullPath = '/trade-api/v2' + route;
+    const signature = sign(kalshi.accounts.live, method, fullPath, ts, 'pss');
+    const res = await kalshi.raw(method, route, body, { 'x-kalshi-ts': String(ts), 'x-kalshi-signature': signature, 'content-type': 'application/json' });
+    log('all_no_order', { id: position.id, action, status: res.status, marker });
+    return { ok: true, status: res.status, marker };
+  } catch (e) {
+    log('all_no_order_error', { id: position.id, action, error: String(e.message || e) });
+    return { ok: false, error: String(e.message || e) };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,12 +1093,11 @@ function readBody(req) {
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
 async function serveDashboard(route, res) {
-  // Each route is a real book, served from its own HTML file:
-  //   /dry  -> index.html      (simulated money)
-  //   /live -> live-home.html  (real Kalshi account)
-  // The page says which book it is. The server only fills in the numbers.
-  const book = route === '/live' ? 'live' : 'dry';
-  const file = path.join(HERE, book === 'live' ? 'live-home.html' : 'index.html');
+  // Kai-LIVE serves exactly one dashboard: live-home.html (the real Kalshi
+  // account). The page says which book it is. The server only fills in the
+  // numbers.
+  const book = 'live';
+  const file = path.join(HERE, 'live-home.html');
   if (book === 'live') await refreshLive(false);
   rememberTitles(LANES);
   const snap = snapshotPayload();
@@ -1111,14 +1139,10 @@ async function handle(req, res) {
 
   if (method === 'OPTIONS') return json(res, { ok: true });
 
-  // --- static pages: three real books, three real files.
-  // '/' is the DRY book, '/live' is the LIVE book, '/all-no-markets' is the
-  // NO-side book. The button in the header is a plain link to the file that
-  // shows that book. There is no client-side mode flipping: a page IS a book.
-  if (p === '/' || p === '/index.html' || p === '/dry') {
-    return serveDashboard('/dry', res);
-  }
-  if (p === '/live' || p === '/live-home.html') {
+  // --- static pages: Kai-LIVE serves the LIVE book - the ONLY book on this
+  // server - plus the NO-side book. There is no DRY page here and no
+  // client-side mode flipping: a page IS a book.
+  if (p === '/' || p === '/index.html' || p === '/dry' || p === '/live' || p === '/live-home.html') {
     return serveDashboard('/live', res);
   }
   if (p === '/all-no-markets') {
@@ -1139,7 +1163,7 @@ async function handle(req, res) {
       ok: true, mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
       hosts: { kalshi_live: kalshi.LIVE_BASE, kalshi_demo: kalshi.DEMO_BASE, spot: 'api.exchange.coinbase.com', llm: ENV.KILO_BASE_URL },
       credentials: { live_key: kalshi.accounts.live.keyId, demo_key: kalshi.accounts.demo.keyId, llm_token: (ENV.KILO_TOKEN || '').slice(0, 12) + '...' },
-      dry_balance: liveCash(),
+      live_balance: liveCash(),
     });
   }
   if (p === '/api/provenance') {
@@ -1167,23 +1191,11 @@ async function handle(req, res) {
     return json(res, { lines: state.logs.slice(0, n) });
   }
 
-  // --- mode switch (operator-controlled only)
-  // POST /api/mode with { mode: 'dry' | 'live' } flips the engine's book.
-  // This is the ONLY way the engine switches between DRY and LIVE execution.
+  // --- mode: FIXED. Kai-LIVE is the LIVE-only server. There is no mode
+  // switch and no dry book. Any attempt to flip modes is refused: paper
+  // trading lives on the separate Kai-Mirror server (port 8787).
   if (p === '/api/mode' && method === 'POST') {
-    const b = await readBody(req);
-    const target = String(b.mode || '').toLowerCase();
-    if (target !== 'dry' && target !== 'live') {
-      return json(res, { error: 'mode must be "dry" or "live"' }, 400);
-    }
-    if (state.mode === target) {
-      return json(res, { ok: true, mode: state.mode, message: 'already in ' + target });
-    }
-    const prev = state.mode;
-    state.mode = target;
-    save();
-    broadcast('mode', target);
-    return json(res, { ok: true, mode: state.mode, previous: prev, live_cash: target === 'live' ? liveCash() : null });
+    return json(res, { error: 'Kai-LIVE is the LIVE-only server (port 8788). Mode is fixed to live. Paper trading runs on the separate Kai-Mirror server (port 8787).' }, 403);
   }
   if (p === '/api/mode') return json(res, modePayload());
 
@@ -1229,28 +1241,6 @@ async function handle(req, res) {
       b.exit_reason || 'manual'
     );
     return json(res, result, result.error ? 400 : 200);
-  }
-
-  // --- dry controls
-  if (p === '/api/dry/cash' && method === 'POST') {
-    const b = await readBody(req);
-    const amount = Number(b.amount);
-    if (!amount || amount <= 0) return json(res, { error: 'amount must be positive' }, 400);
-    state.live.baseline = amount;
-    state.live.starting_balance = amount;
-    save();
-    return json(res, modePayload());
-  }
-  if (p === '/api/dry/reset' && method === 'POST') {
-    const start = Number(ENV.DRY_START_BALANCE || 300);
-    state.live = { starting_balance: start, baseline: start, positions: [], closed: [], real_started: true };
-    for (const name of Object.keys(state.lanes)) {
-      state.lanes[name].trades = 0; state.lanes[name].wins = 0; state.lanes[name].losses = 0;
-      state.lanes[name].realized = 0; state.lanes[name].entries = 0; state.lanes[name].equity = { labels: [], pnl: [] };
-    }
-    save();
-    broadcast('snapshot', 'dry book reset');
-    return json(res, modePayload());
   }
 
   // --- strategies
@@ -1519,7 +1509,7 @@ const server = http.createServer((req, res) => {
 });
 
 async function boot() {
-  log('boot', { mode: 'dry', dry_balance: liveCash(), kalshi_live: kalshi.LIVE_BASE });
+  log('boot', { mode: 'live', live_balance: liveCash(), kalshi_live: kalshi.LIVE_BASE });
   await pollSpot();
   setInterval(pollSpot, 2000);
   setInterval(() => { refreshLive(false).catch(() => { }); }, 6000);
@@ -1536,12 +1526,12 @@ async function boot() {
     try { rememberTitles(LANES); await refreshLive(false); broadcast('snapshot', 'tick'); sseMessage({ e: 'tick', at: new Date().toISOString(), spot_btc: spot['BTC-USD'].price }); } catch (e) { }
   }, 3000);
   server.listen(PORT, HOST, () => {
-    console.log('Kai-Mirror listening on http://' + HOST + ':' + PORT + '/');
+    console.log('Kai-LIVE listening on http://' + HOST + ':' + PORT + '/');
     console.log('  kalshi live  :', kalshi.LIVE_BASE);
     console.log('  kalshi demo  :', kalshi.DEMO_BASE, '(fallback)');
     console.log('  spot         : Coinbase Exchange public ticker');
     console.log('  llm          :', ENV.KILO_BASE_URL, 'model', ENV.KILO_MODEL);
-    console.log('  mode         :', 'dry', '| dry cash', liveCash(), '| dry balance', state.live.starting_balance);
+    console.log('  mode         :', 'live', '| live cash', liveCash(), '| live balance', state.live.starting_balance);
     // Lanes start/stop is operator-controlled only. No auto-start.
     save();
   });
