@@ -23,7 +23,7 @@ const brain = require('./brain');
 
 const HERE = __dirname;
 const ENV = kalshi.ENV;
-const PORT = Number(ENV.PORT || 8787);
+const PORT = Number(ENV.PORT || 8788);  // LIVE server: port 8788
 const HOST = '127.0.0.1';
 
 // ---------------------------------------------------------------------------
