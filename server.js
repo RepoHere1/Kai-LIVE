@@ -45,6 +45,23 @@ const LANES = [
 ];
 const LANE_BY_NAME = new Map(LANES.map(l => [l.name, l]));
 
+// ===========================================================================
+// OPERATOR LAW — HARD-CODED, NON-NEGOTIABLE (by direct operator command).
+//   1. The operator's button push is IMMEDIATE, ABSOLUTE LAW. A lane is turned
+//      ON or OFF the instant the toggle endpoint is hit. Nothing — no timer,
+//      no engine tick, no boot routine, no "supervisor", no auto-start, no
+//      auto-restart, no health-check, no watchdog — may ever flip a lane's
+//      `running` flag against the operator's last explicit command.
+//   2. There is NO supervisor process in this codebase and there will never be.
+//      Any future code that starts, restarts, resurrects, keeps-alive, or
+//      auto-reenables a lane WITHOUT a direct operator toggle is FORBIDDEN and
+//      must be removed. The ONLY writer of `ls.running` is the operator toggle
+//      endpoint below (and the operator `on`/`off` control scripts).
+//   3. A lane stays EXACTLY the way the operator last set it — forever — until
+//      the operator changes it again.
+//   Violating any of these three is a bug, full stop.
+// ===========================================================================
+
 // ---------------------------------------------------------------------------
 // Persisted state
 // ---------------------------------------------------------------------------
@@ -481,6 +498,8 @@ async function engineTick() {
     if (held >= 1) { ls.skips++; ls.last_skip = 'already holding'; continue; }
     
     const fair = side === 'YES' ? (q.yes_ask + result.edge) : (q.no_ask + result.edge);
+    // OPERATOR LAW: if the operator stopped this lane mid-tick, place NO order.
+    if (!ls.running) { ls.skips++; ls.last_skip = 'operator stop (mid-tick)'; continue; }
     const opened = state.mode === 'live'
       ? await openLivePosition(lane, q, side, price, fair, result.edge, perSec)
       : openLivePosition(lane, q, side, price, fair, result.edge, perSec);
@@ -1259,7 +1278,10 @@ async function handle(req, res) {
     if (!lane) return json(res, { error: 'unknown strategy: ' + name }, 404);
     const b = await readBody(req);
     const ls = laneState(name);
-    // Accept an explicit desired state from the client; default to toggle.
+    // OPERATOR LAW: the operator's command is IMMEDIATE and ABSOLUTE. Apply the
+    // requested state synchronously and reply with it the same tick. There is no
+    // supervisor, timer, or auto-start that can override this — the operator is
+    // the only writer of `ls.running`.
     if (typeof b.running === 'boolean') {
       ls.running = b.running;
     } else {
@@ -1531,11 +1553,11 @@ async function boot() {
     console.log('  kalshi demo  :', kalshi.DEMO_BASE, '(fallback)');
     console.log('  spot         : Coinbase Exchange public ticker');
     console.log('  llm          :', ENV.KILO_BASE_URL, 'model', ENV.KILO_MODEL);
-    console.log('  mode         :', 'live', '| live cash', liveCash(), '| live balance', state.live.starting_balance);
+    console.log('  mode         :', 'live', '| live_balance:', state.live ? state.live.starting_balance : 'N/A');
     // Lanes start/stop is operator-controlled only. No auto-start.
     save();
   });
 }
+
 if (require.main === module) boot();
 module.exports = { handle, snapshotPayload, liveAccountPayload, cards, state, engineTick, pollSpot, noBook, liveBookPayload, openLivePosition, closeLivePosition, markLivePositions };
-

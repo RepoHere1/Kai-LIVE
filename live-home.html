@@ -2001,59 +2001,37 @@ async function toggleStrategy(name, quiet, desiredState) {
     wantedRunning = !!card && !card.running;
   }
 
-  if (btn) btn.classList.add('loading');
+  // OPERATOR LAW: a button push is IMMEDIATE, ABSOLUTE law. Paint the card to
+  // the operator's intent the INSTANT it is pressed — no polling, no loading
+  // wait, no "did the server accept it?" loop. The server applies the same
+  // state synchronously; refresh() only reconciles the numbers afterwards.
+  const paintNow = (running) => {
+    if (btn) { btn.textContent = running ? 'Stop' : 'Start'; btn.classList.remove('loading'); }
+    const pill = document.getElementById('pill-' + name);
+    if (pill) {
+      pill.className = 'pill ' + (running ? 'ok' : 'no');
+      pill.innerHTML = running ? '<span class="dot pulse"></span>running' : 'stopped';
+    }
+    const cardEl = document.getElementById('card-' + name);
+    if (cardEl) cardEl.classList.toggle('hot', running);
+  };
+  paintNow(wantedRunning);
 
   try {
-    let r = await fetch('/api/strategy/' + encodeURIComponent(name) + '/toggle', {
+    const r = await fetch('/api/strategy/' + encodeURIComponent(name) + '/toggle', {
       method: 'POST', headers: authHeaders(), body: JSON.stringify({ running: wantedRunning }),
     });
-
     const d = await r.json().catch(() => ({}));
-    if (!r.ok || d.error) {
+
+    if (!r.ok || d.error || (typeof d.running === 'boolean' && d.running !== wantedRunning)) {
       if (!quiet) note(name + ': ' + (d.error || ('request failed (' + r.status + ')')));
+      refresh();  // server disagreed — reconcile to the true state
       return;
     }
-    if (typeof d.running === 'boolean' && d.running !== wantedRunning) {
-      if (!quiet) note(name + ': server did not accept the requested state change');
-      return;
-    }
-    if (!quiet) note(name + ': ' + (wantedRunning ? 'start accepted' : 'stop accepted'));
-
-    let maxWait = 120;
-    let pollCount = 0;
-
-    while (pollCount < maxWait) {
-      const delayMs = pollCount < 10 ? 200 : 500;
-      await new Promise(r => setTimeout(r, delayMs));
-      pollCount++;
-
-      try {
-        const strategiesResp = await fetch('/api/strategies', { headers: authHeaders() });
-        const strategiesData = await strategiesResp.json().catch(() => ({}));
-        const strategyData = strategiesData[name];
-
-        const snapshotResp = await fetch('/api/snapshot', { headers: authHeaders() });
-        const snapshot = await snapshotResp.json().catch(() => ({}));
-        const cards = snapshot.strategy_cards || [];
-        const card = cards.find(c => c.name === name);
-
-        const apiReady = strategyData && strategyData.running === wantedRunning;
-        const chartReady = card && card.running === wantedRunning;
-
-        if (apiReady && chartReady) {
-          if (!quiet) {
-            note(name + ': ' + (wantedRunning ? 'started successfully' : 'stopped successfully'));
-          }
-          break;
-        }
-      } catch (e) {}
-    }
-
-    if (pollCount >= maxWait && btn) {
-      note(name + ': Timeout waiting for state change. Check the strategy chart.');
-    }
-  } finally {
-    if (btn) btn.classList.remove('loading');
+    if (!quiet) note(name + ': ' + (wantedRunning ? 'start' : 'stop') + ' applied immediately');
+    refresh();
+  } catch (e) {
+    if (!quiet) note(name + ': ' + e.message);
     refresh();
   }
 }
@@ -2548,28 +2526,15 @@ async function showAnalysis(name) {
 async function startAllLive() {
   const btn = document.getElementById('startAllLiveBtn');
   if (btn) { btn.classList.add('loading'); btn.classList.add('yellow'); }
-  
+
   try {
-    // Kai-LIVE is permanently in LIVE mode: no mode switch exists on this server.
-    // Start all stopped lanes
+    // OPERATOR LAW: Start all is a burst of immediate operator toggles. Each
+    // lane flips the instant its request lands — no polling, no waiting.
     const names = (SNAPSHOT.strategy_cards || []).filter(c => !c.running).map(c => c.name);
-    if (!names.length) {
-      note('all lanes already running');
-      return;
-    }
-    
+    if (!names.length) { note('all lanes already running'); return; }
     for (const n of names) await toggleStrategy(n, true, true);
-    
-    // Poll until all are running
-    let pollCount = 0;
-    while (pollCount < 120) {
-      await new Promise(r => setTimeout(r, 500));
-      pollCount++;
-      try {
-        const s = await (await fetch('/api/strategies', { headers: authHeaders() })).json().catch(() => ({}));
-        if (names.every(n => s[n] && s[n].running)) { note('LIVE started: ' + names.join(', ')); break; }
-      } catch (e) {}
-    }
+    note('LIVE started: ' + names.join(', '));
+    refresh();
   } finally {
     if (btn) { btn.classList.remove('loading'); btn.classList.remove('yellow'); }
   }
@@ -2577,39 +2542,24 @@ async function startAllLive() {
 
 async function stopAll() {
   const names = (SNAPSHOT.strategy_cards || []).filter(c => c.running).map(c => c.name);
-  
+
   // Find the "Stop all" button (not the LIVE kill button) - it says "Stop all" onclick
-  const stopAllBtn = Array.from(document.querySelectorAll('button')).find(b => 
+  const stopAllBtn = Array.from(document.querySelectorAll('button')).find(b =>
     b.textContent.trim() === 'Stop all' && b.onclick.toString().includes('stopAll')
   );
-  
+
   // Apply yellow spinner to STOP ALL button
   if (stopAllBtn) {
     stopAllBtn.classList.add('loading');
     stopAllBtn.classList.add('yellow');
   }
-  
+
   try {
+    // OPERATOR LAW: Stop all is a burst of immediate operator toggles. Each lane
+    // goes dark the instant its request lands — no polling, no waiting.
     for (const n of names) await toggleStrategy(n, true, false);
-    
-    // Poll until all are actually stopped
-    let maxWait = 120;
-    let pollCount = 0;
-    while (pollCount < maxWait) {
-      await new Promise(r => setTimeout(r, 500));
-      pollCount++;
-      
-      try {
-        const strategiesResp = await fetch('/api/strategies', { headers: authHeaders() });
-        const strategiesData = await strategiesResp.json().catch(() => ({}));
-        const allStopped = names.every(n => strategiesData[n] && !strategiesData[n].running);
-        
-        if (allStopped) {
-          note('stopped: ' + (names.join(', ') || 'nothing was running'));
-          break;
-        }
-      } catch (e) {}
-    }
+    note('stopped: ' + (names.join(', ') || 'nothing was running'));
+    refresh();
   } finally {
     if (stopAllBtn) {
       stopAllBtn.classList.remove('loading');
@@ -2618,12 +2568,10 @@ async function stopAll() {
   }
 }
 
-// Kill all: the emergency button. Unlike Stop all (a graceful
-// SIGTERM that lets a cycle finish), Kill all hard-kills every
-// running process in the book the page is in, right now, and
-// records an operator stop so neither supervisor resurrects a
-// killed lane. The button is law: killed lanes stay down until
-// Start is pressed here again.
+// OPERATOR LAW: there is NO supervisor and NO "Kill all" emergency path in
+// this codebase. Stop all (above) is the only mass-stop, and it is a burst of
+// operator toggles. A lane goes down only when the operator tells it to, and it
+// stays down until the operator starts it again. Nothing resurrects a lane.
 // Collapse the live feed panel. It is tall and its numbers tick continuously,
 // so it earns the right to be folded away once you have read it.
 function toggleFeeds() {
