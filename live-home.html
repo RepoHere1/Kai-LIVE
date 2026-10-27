@@ -489,7 +489,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-btc_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-btc_updown" onclick="toggleStrategy('btc_updown', false)">Stop</button>
+             <button id="btn-btc_updown" onclick="toggleStrategy('btc_updown')">Stop</button>
              <button onclick="showAnalysis('btc_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -513,7 +513,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-btc_1h_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-btc_1h_updown" onclick="toggleStrategy('btc_1h_updown', false)">Stop</button>
+             <button id="btn-btc_1h_updown" onclick="toggleStrategy('btc_1h_updown')">Stop</button>
              <button onclick="showAnalysis('btc_1h_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -537,7 +537,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-eth_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-eth_updown" onclick="toggleStrategy('eth_updown', false)">Stop</button>
+             <button id="btn-eth_updown" onclick="toggleStrategy('eth_updown')">Stop</button>
              <button onclick="showAnalysis('eth_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -561,7 +561,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-eth_1h_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-eth_1h_updown" onclick="toggleStrategy('eth_1h_updown', false)">Stop</button>
+             <button id="btn-eth_1h_updown" onclick="toggleStrategy('eth_1h_updown')">Stop</button>
              <button onclick="showAnalysis('eth_1h_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -585,7 +585,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-hyperliquid_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-hyperliquid_updown" onclick="toggleStrategy('hyperliquid_updown', false)">Stop</button>
+             <button id="btn-hyperliquid_updown" onclick="toggleStrategy('hyperliquid_updown')">Stop</button>
              <button onclick="showAnalysis('hyperliquid_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -609,7 +609,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-hyperliquid_1h_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-hyperliquid_1h_updown" onclick="toggleStrategy('hyperliquid_1h_updown', false)">Stop</button>
+             <button id="btn-hyperliquid_1h_updown" onclick="toggleStrategy('hyperliquid_1h_updown')">Stop</button>
              <button onclick="showAnalysis('hyperliquid_1h_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -633,7 +633,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-xrp_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-xrp_updown" onclick="toggleStrategy('xrp_updown', false)">Stop</button>
+             <button id="btn-xrp_updown" onclick="toggleStrategy('xrp_updown')">Stop</button>
              <button onclick="showAnalysis('xrp_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -657,7 +657,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-xrp_1h_updown-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-xrp_1h_updown" onclick="toggleStrategy('xrp_1h_updown', false)">Stop</button>
+             <button id="btn-xrp_1h_updown" onclick="toggleStrategy('xrp_1h_updown')">Stop</button>
              <button onclick="showAnalysis('xrp_1h_updown')">ANALYSIS OF</button>
            </span>
          </div>
@@ -681,7 +681,7 @@ button.loading.yellow::after {
          <div class="cfoot">
            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-all_no_markets-dep">$0.00</span></span>
            <span class="bar" onclick="event.stopPropagation()">
-             <button id="btn-all_no_markets" onclick="toggleStrategy('all_no_markets', false)">Stop</button>
+             <button id="btn-all_no_markets" onclick="toggleStrategy('all_no_markets')">Stop</button>
              <button onclick="showAnalysis('all_no_markets')">ANALYSIS OF</button>
            </span>
          </div>
@@ -2024,16 +2024,19 @@ async function toggleStrategy(name, quiet, desiredState) {
     const d = await r.json().catch(() => ({}));
 
     if (!r.ok || d.error || (typeof d.running === 'boolean' && d.running !== wantedRunning)) {
-      if (!quiet) note(name + ': ' + (d.error || ('request failed (' + r.status + ')')));
-      refresh();  // server disagreed — reconcile to the true state
-      return;
-    }
+          const msg = d.error || ('request failed (' + r.status + ')');
+          if (!quiet) note(name + ': ' + msg);
+          paintNow(!wantedRunning);
+          refresh();
+          return;
+        }
     if (!quiet) note(name + ': ' + (wantedRunning ? 'start' : 'stop') + ' applied immediately');
     refresh();
   } catch (e) {
-    if (!quiet) note(name + ': ' + e.message);
-    refresh();
-  }
+      if (!quiet) note(name + ': ' + e.message);
+      paintNow(!wantedRunning);
+      refresh();
+    }
 }
 async function saveAlerts() {
   const r = await fetch('/api/alerts', {
@@ -2632,6 +2635,7 @@ safeRun(loadLogs, 'loadLogs');
 
 safeRun(refresh, 'refresh');
 safeRun(refreshFeeds, 'refreshFeeds');
+</script>
   <!-- ALL NO MARKETS section is now integrated into the main dashboard -->
   <div class="panel all-no-panel">
     <div class="ph">
