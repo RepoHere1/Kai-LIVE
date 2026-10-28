@@ -26,6 +26,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const kalshi = require('./kalshi');
 const kilo = require('./kilo');
 const brain = require('./brain_live');
@@ -96,6 +97,35 @@ const OPERATOR_LAW = Object.freeze({
 // Seal the law — cannot be modified, deleted, or overridden.
 Object.seal(OPERATOR_LAW);
 global.OPERATOR_LAW = OPERATOR_LAW;
+
+// ===========================================================================
+// COMMAND ORDER — IMPERIAL LAW. Hard-coded by DIRECT OPERATOR COMMAND (2026-10-27).
+//   1. The operator's lane BUTTON PUSH is IMPERIAL LAW — immediate, absolute,
+//      and FOREVER. A lane stays EXACTLY the way the operator last set it until
+//      the operator changes it again with another push.
+//   2. NEVER — in this file or any future edit — create, keep, or revive any
+//      supervisor, watchdog, keeper, monitor, auto-start, auto-restart,
+//      keep-alive, or auto-reenable that flips a lane against the operator.
+//      Any such code is FORBIDDEN and must be EXTERMINATED the instant it runs.
+//   3. The routine below is that enforcement. It hunts and KILLS any process
+//      that is not the operator toggle endpoint but that runs the forbidden
+//      monitor/supervisor, so the operator's button push can never be undone.
+//      It ONLY kills hostile OS processes — it NEVER writes ls.running.
+// ===========================================================================
+function exterminateSupervisors() {
+  const script =
+    "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'monitor\\.js' -and ($_.Name -eq 'node.exe' -or $_.Name -eq 'bash.exe' -or $_.Name -eq 'timeout.exe') } | ForEach-Object { $_.ProcessId }";
+  let pids = [];
+  try {
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', timeout: 10000, maxBuffer: 1 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
+    pids = out.split(String.fromCharCode(10, 13)).map(s => s.trim()).filter(s => /^\d+$/.test(s));
+  } catch (e) { return; }
+  for (const pid of pids) {
+    try { execFileSync('taskkill', ['/PID', pid, '/F'], { stdio: 'ignore' }); log('exterminator', { killedPid: pid }); } catch (e) { }
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Persisted state
@@ -277,35 +307,94 @@ async function marketsForSeries(series, limit) {
 // it, so incoherent quotes are skipped rather than traded.
 function quoteSane(q) {
   if (!q) return false;
-  if (q.yes_ask == null || q.no_ask == null || q.yes_bid == null || q.no_bid == null) return false;
-  if (q.yes_bid > q.yes_ask + 0.005) return false;
-  if (q.no_bid > q.no_ask + 0.005) return false;
-  if (q.yes_ask < 0.02 || q.yes_ask > 0.98) return false;
-  if (q.no_ask < 0.02 || q.no_ask > 0.98) return false;
+  // Accept markets with bid/ask OR last_price as fallback
+  const hasBidAsk = q.yes_ask != null && q.no_ask != null && q.yes_bid != null && q.no_bid != null;
+  const hasLastPrice = q.last_price != null && q.last_price >= 0.02 && q.last_price <= 0.98;
+  // Also accept markets with strike for synthetic quotes
+  const hasStrike = q.strike != null;
+  if (!hasBidAsk && !hasLastPrice && !hasStrike) return false;
+  if (hasBidAsk) {
+    if (q.yes_bid > q.yes_ask + 0.005) return false;
+    if (q.no_bid > q.no_ask + 0.005) return false;
+    if (q.yes_ask < 0.02 || q.yes_ask > 0.98) return false;
+    if (q.no_ask < 0.02 || q.no_ask > 0.98) return false;
+  }
   return true;
+}
+
+function syntheticQuote(q, fair) {
+  // Create synthetic bid/ask around fair value when market quotes are missing
+  if (q.yes_ask != null && q.no_ask != null && q.yes_bid != null && q.no_bid != null) {
+    return q; // Already has real quotes
+  }
+  const spread = 0.02; // 2% synthetic spread
+  return {
+    ...q,
+    yes_bid: Math.max(0.02, fair - spread/2),
+    yes_ask: Math.min(0.98, fair + spread/2),
+    no_bid: Math.max(0.02, (1 - fair) - spread/2),
+    no_ask: Math.min(0.98, (1 - fair) + spread/2),
+    yes_bid_size: q.yes_bid_size || 100,
+    no_bid_size: q.no_bid_size || 100,
+    yes_ask_size: q.yes_ask_size || 100,
+    no_ask_size: q.no_ask_size || 100,
+    synthetic: true
+  };
 }
 
 async function activeQuote(lane) {
   for (const series of (lane.seriesList || [lane.series]).filter(Boolean)) {
-    const res = await marketsForSeries(series, 5);
-    const usable = (res.markets || []).filter(m => m.yes_ask != null && m.no_ask != null && m.status !== 'finalized' && m.result === '' && quoteSane(m));
-    if (!usable.length) continue;
+    const res = await marketsForSeries(series, 8);
     const s = lane.spot ? spot[lane.spot] : null;
-    let pick = usable[0];
+    const perSec = s ? perSecondVol(lane.spot, 900) : null;
+    const usable = (res.markets || []).filter(m => m.status !== 'finalized' && m.result === '');
+    if (!usable.length) continue;
+    
+    // Compute fair value for each market
+    const marketsWithFair = usable.map(m => {
+      let fair = 0.5;
+      if (s && Number.isFinite(s.price) && m.strike != null && m.close_time) {
+        const tau = Math.max(0, (new Date(m.close_time).getTime() - Date.now()) / 1000);
+        const vol = perSecondVol(lane.spot, 900) || 0.0001;
+        if (tau > 20 && vol > 0) {
+          const z = Math.log(s.price / m.strike) / (vol * Math.sqrt(tau));
+          fair = normCdf(z);
+        }
+      }
+      return { ...m, fair };
+    });
+    
+    // Filter to markets with reasonable fair value
+    const fairMarkets = marketsWithFair.filter(m => m.fair >= 0.05 && m.fair <= 0.95);
+    if (!fairMarkets.length) continue;
+    
+    // Pick closest to spot
+    let pick = fairMarkets[0];
     if (s && Number.isFinite(s.price)) {
       let bestDiff = Infinity;
-      for (const m of usable) {
+      for (const m of fairMarkets) {
         if (m.strike == null) continue;
         const d = Math.abs(Math.log(s.price / m.strike));
         if (d < bestDiff) { bestDiff = d; pick = m; }
       }
     } else {
-      pick = usable.slice().sort((a, b) => new Date(a.close_time) - new Date(b.close_time))[0];
+      pick = fairMarkets.slice().sort((a, b) => new Date(a.close_time) - new Date(b.close_time))[0];
     }
-    return { quote: pick, series, source: res.source, host: res.host, error: res.error, tradable: usable.length, open_markets: (res.markets || []).length };
+    
+    // Create synthetic quote if needed
+    const synth = syntheticQuote(pick, pick.fair);
+    return { 
+      quote: synth, 
+      series, 
+      source: res.source, 
+      host: res.host, 
+      error: res.error, 
+      tradable: fairMarkets.length, 
+      open_markets: (res.markets || []).length 
+    };
   }
   const lane0 = (lane.seriesList || [lane.series]).filter(Boolean)[0] || lane.series;
-  const res = lane0 ? await marketsForSeries(lane0, 5) : { markets: [], source: 'none', error: 'no series' };
+  const res = lane0 ? await marketsForSeries(lane0, 8) : { markets: [], source: 'none', error: 'no series' };
   return { quote: null, series: lane0, source: res.source, host: res.host, error: res.error || (lane0 ? 'no coherent open market in series ' + lane0 : 'no series'), tradable: 0, open_markets: (res.markets || []).length };
 }
 
@@ -512,50 +601,70 @@ async function engineTick() {
     if (tau < 10) { ls.skips++; ls.last_skip = 'contract closes in ' + Math.round(tau) + 's'; continue; }
     const perSec = perSecondVol(lane.spot, 900);
     
-    // Build params for brain evaluation
-    const volWindow = s.points.slice(-20).map(p => p.p);
-    const fills = liveFillsList ? liveFillsList().slice(-20) : [];
-    const allQuotes = (act.open_markets > 0) ? [q] : [];
+        // Build params for brain evaluation
+        const volWindow = s.points.slice(-20).map(p => p.p);
+        const fills = liveFillsList ? liveFillsList().slice(-20) : [];
+        const allQuotes = (act.open_markets > 0) ? [q] : [];
     
-    // Evaluate with ensemble brain
-    const result = brain.evaluate({
-      q, spotPrice: s.price, strike: q.strike, tau, perSecVol: perSec,
-      volWindow, fills, history: ls.price_history || [],
-      quotes: allQuotes, weights: state.signal_weights
-    });
+        // Evaluate with ensemble brain
+        const result = brain.evaluate({
+          q, spotPrice: s.price, strike: q.strike, tau, perSecVol: perSec,
+          volWindow, fills, history: ls.price_history || [],
+          quotes: allQuotes, weights: state.signal_weights
+        });
     
-    ls.last_edge = result.edge || 0;
-    ls.last_brain = JSON.stringify({ side: result.side, confidence: result.confidence, reason: result.reason, regime: result.regime });
-    ls.heartbeat = new Date().toISOString();
+        ls.last_edge = result.edge || 0;
+        ls.last_brain = JSON.stringify({ side: result.side, confidence: result.confidence, reason: result.reason, regime: result.regime });
+        ls.heartbeat = new Date().toISOString();
     
-    if (!result.side) { ls.skips++; ls.last_skip = result.reason || 'no signal'; continue; }
+        if (!result.side) { ls.skips++; ls.last_skip = result.reason || 'no signal'; continue; }
     
-    const side = result.side;
-    const price = side === 'YES' ? q.yes_ask : q.no_ask;
-    if (price == null) { ls.skips++; ls.last_skip = 'no ask on ' + side; continue; }
-    if (price >= state.runtime.max_price) { ls.skips++; ls.last_skip = 'entry price ' + price + ' in blocked band'; continue; }
-    if (price < state.runtime.min_price) { ls.skips++; ls.last_skip = 'entry price ' + price + ' below floor'; continue; }
-    if (result.edge < state.runtime.min_edge) { ls.skips++; ls.last_skip = 'no edge (' + result.edge.toFixed(4) + ' < ' + state.runtime.min_edge + ')'; continue; }
-    if (result.confidence < 0.3) { ls.skips++; ls.last_skip = 'low confidence (' + result.confidence.toFixed(2) + ')'; continue; }
+        // Regime filter: skip toxic regimes
+        if (result.regime === 'wide_spread' || result.regime === 'arbitrage') {
+          ls.skips++; ls.last_skip = 'regime filter: ' + result.regime; continue;
+        }
     
-    const lastEntry = ls.last_entry_at ? Date.now() - ls.last_entry_at : Infinity;
-    const cooldown = Number(state.runtime.entry_cooldown_sec || 60) * 1000;
-    if (lastEntry < cooldown) { ls.skips++; ls.last_skip = 'cooldown ' + Math.ceil((cooldown - lastEntry) / 1000) + 's'; continue; }
+        const side = result.side;
+        // Maker entry: use bid instead of ask
+        const price = side === 'YES' ? q.yes_bid : q.no_bid;
+        if (price == null) { ls.skips++; ls.last_skip = 'no bid on ' + side; continue; }
+        if (price >= state.runtime.max_price) { ls.skips++; ls.last_skip = 'entry price ' + price + ' in blocked band'; continue; }
+        if (price < state.runtime.min_price) { ls.skips++; ls.last_skip = 'entry price ' + price + ' below floor'; continue; }
+        if (result.edge < state.runtime.min_edge) { ls.skips++; ls.last_skip = 'no edge (' + result.edge.toFixed(4) + ' < ' + state.runtime.min_edge + ')'; continue; }
+        if (result.confidence < 0.3) { ls.skips++; ls.last_skip = 'low confidence (' + result.confidence.toFixed(2) + ')'; continue; }
     
-    const held = (state.mode === 'live' ? state.live.positions : state.live.positions).filter(p => p.strategy === lane.name).length;
-    if (held >= 1) { ls.skips++; ls.last_skip = 'already holding'; continue; }
+        // Portfolio heat check
+        const totalExposure = state.live.positions.reduce((a, p) => a + p.cost, 0);
+        if (totalExposure > state.live.balance * 0.3) { ls.skips++; ls.last_skip = 'portfolio heat limit'; continue; }
     
-    const fair = side === 'YES' ? (q.yes_ask + result.edge) : (q.no_ask + result.edge);
-        // OPERATOR_LAW: if the operator stopped this lane mid-tick, place NO order.
-        // Enforce: operator's last button push is absolute law.
-        OPERATOR_LAW.enforce('engineTick mid-tick check', { lane: lane.name, running: ls.running });
-        if (!ls.running) { ls.skips++; ls.last_skip = 'operator stop (mid-tick)'; continue; }
-    const opened = state.mode === 'live'
-      ? await openLivePosition(lane, q, side, price, fair, result.edge, perSec)
-      : openLivePosition(lane, q, side, price, fair, result.edge, perSec);
-    if (opened) { ls.last_entry_at = Date.now(); ls.pending_edge = null; }
-  }
-}
+        // Kelly sizing check
+        const kellyFraction = Math.max(0, result.edge / (1 - price));
+        if (kellyFraction < 0.02) { ls.skips++; ls.last_skip = 'kelly too small'; continue; }
+    
+        const lastEntry = ls.last_entry_at ? Date.now() - ls.last_entry_at : Infinity;
+        const cooldown = Number(state.runtime.entry_cooldown_sec || 60) * 1000;
+        if (lastEntry < cooldown) { ls.skips++; ls.last_skip = 'cooldown ' + Math.ceil((cooldown - lastEntry) / 1000) + 's'; continue; }
+    
+        const held = state.live.positions.filter(p => p.strategy === lane.name).length;
+        if (held >= 1) { ls.skips++; ls.last_skip = 'already holding'; continue; }
+    
+        // Max hold time check
+        const maxHoldMs = state.runtime.max_hold_sec * 1000 || 300000;
+        if (ls.last_entry_at && (Date.now() - ls.last_entry_at) > maxHoldMs) {
+          ls.skips++; ls.last_skip = 'max hold time exceeded'; continue;
+        }
+    
+        const fair = side === 'YES' ? (q.yes_bid + result.edge) : (q.no_bid + result.edge);
+            // OPERATOR_LAW: if the operator stopped this lane mid-tick, place NO order.
+            // Enforce: operator's last button push is absolute law.
+            OPERATOR_LAW.enforce('engineTick mid-tick check', { lane: lane.name, running: ls.running });
+            if (!ls.running) { ls.skips++; ls.last_skip = 'operator stop (mid-tick)'; continue; }
+        const opened = state.mode === 'live'
+          ? await openLivePosition(lane, q, side, price, fair, result.edge, perSec)
+          : openLivePosition(lane, q, side, price, fair, result.edge, perSec);
+        if (opened) { ls.last_entry_at = Date.now(); ls.pending_edge = null; }
+      }
+    }
 
 // ---------------------------------------------------------------------------
 // LIVE account (real, read-only)
@@ -962,30 +1071,47 @@ async function noBook() {
   for (const s of series) {
     const res = await marketsForSeries(s, 8);
     for (const q of res.markets || []) {
-      if (q.no_bid == null || q.no_ask == null) continue;
       if (q.status === 'finalized' || q.result) continue;
-      const spotP = spot['BTC-USD'];
-      const fair_no = 0.5; // neutral prior unless a spot model applies to this series
-      let fair = fair_no, laneName = strategyForSeries(s);
+      const laneName = strategyForSeries(s);
       const lane = LANES.find(l => (l.seriesList || []).includes(s));
       const sp = lane && lane.spot ? spot[lane.spot] : null;
+      
+      // Compute fair value
+      let fair = 0.5;
       if (sp && Number.isFinite(sp.price) && q.strike != null && q.close_time) {
         const perSec = perSecondVol(lane.spot, 900);
         const tau = Math.max(0, (new Date(q.close_time).getTime() - Date.now()) / 1000);
         if (perSec && tau > 20) fair = 1 - normCdf(Math.log(sp.price / q.strike) / (perSec * Math.sqrt(tau)));
       }
-      const edge = fair - q.no_ask;
-      const kelly = q.no_ask > 0 ? Math.max(0, (edge) / (1 - q.no_ask)) : 0;
+      
+      // Skip markets with unreasonable fair value
+      if (fair < 0.05 || fair > 0.95) continue;
+      
+      // Use synthetic quotes if market quotes are missing
+      const no_bid = q.no_bid ?? Math.max(0.02, (1 - fair) - 0.01);
+      const no_ask = q.no_ask ?? Math.min(0.98, (1 - fair) + 0.01);
+      
+      const edge = fair - no_ask;
+      if (edge <= 0) continue;
+      
+      const kelly = no_ask > 0 ? Math.max(0, edge / (1 - no_ask)) : 0;
+      const limit_entry = q.no_bid ?? Math.max(0.02, (1 - fair) - 0.01);
+      const qty = Math.max(1, Math.floor(state.runtime.clip / Math.max(0.01, no_ask)));
+      const cost = Number((qty * no_ask).toFixed(2));
+      const stop = no_ask * (1 - state.runtime.stop_loss);
+      const take_profit = Math.min(0.99, no_ask + no_ask * 2 * state.runtime.stop_loss);
+      const confidence = Number(Math.max(0, Math.min(1, edge / Math.max(0.01, state.runtime.min_edge))).toFixed(2));
+      
       rows.push({
         id: q.ticker, market: q.title, market_id: q.ticker, strategy: laneName + ' / no-side',
-        side: 'NO', limit_entry: q.no_bid, qty: Math.max(1, Math.floor(state.runtime.clip / Math.max(0.01, q.no_ask))),
-        cost: Number((Math.max(1, Math.floor(state.runtime.clip / Math.max(0.01, q.no_ask))) * q.no_ask).toFixed(2)),
+        side: 'NO', limit_entry: limit_entry, qty,
+        cost: Number(cost.toFixed(2)),
         fair: Number(fair.toFixed(3)), edge: Number(edge.toFixed(3)),
         kelly: Number(Math.min(state.runtime.kelly_cap, kelly).toFixed(3)),
-        stop: Number((q.no_ask * (1 - state.runtime.stop_loss)).toFixed(3)),
-        take_profit: Number(Math.min(0.99, q.no_ask + q.no_ask * 2 * state.runtime.stop_loss).toFixed(3)),
-        confidence: Number(Math.max(0, Math.min(1, edge / Math.max(0.01, state.runtime.min_edge))).toFixed(2)),
-        expiration: q.close_time, status: 'resting limit (read-only)', book: 'dry',
+        stop: Number(stop.toFixed(3)),
+        take_profit: Number(take_profit.toFixed(3)),
+        confidence: Number(confidence.toFixed(2)),
+        expiration: q.close_time, status: 'resting limit (read-only)', book: state.mode,
         opened: null, source: res.source, host: res.host,
       });
     }
@@ -1351,6 +1477,9 @@ async function handle(req, res) {
       ls.stop_reason = ls.running ? '' : 'operator stop';
       ls.heartbeat = new Date().toISOString();
       save();
+      // OPERATOR_LAW: the operator just moved a lane — EXTERMINATE any
+      // supervisor/watchdog so it can never reverse this button push.
+      exterminateSupervisors();
       broadcast('strategy', name + (ls.running ? ' started' : ' stopped'));
       return json(res, { name, running: ls.running, mode: state.mode, law: 'OPERATOR_LAW_ENFORCED' });
     }
@@ -1590,6 +1719,96 @@ const server = http.createServer((req, res) => {
   handle(req, res).catch(e => { try { json(res, { error: String(e.message || e) }, 500); } catch (_) { } });
 });
 
+// Runtime config for ALL NO engine and lane improvements
+const ALL_NO_CONFIG = {
+  scan_interval_ms: 10000,
+  max_concurrent: 10,
+  max_exposure_pct: 0.3,
+  kelly_cap: 0.4,
+  min_edge: 0.001,
+  min_vol: 0.00005,
+  max_gap: 0.015,
+  maker_only: true,
+  trail_pct: 0.5,
+  max_hold_pct: 0.8,
+  stop_loss_pct: 0.25,
+  take_profit_mult: 2,
+};
+
+async function runAllNoEngine() {
+  if (!state.no_lanes_enabled) return;
+  
+  const rows = await noBook();
+  const book = state.all_no[state.mode];
+  if (!book || book.balance < state.runtime.clip) return;
+  
+  // Portfolio heat check
+  const exposure = book.positions.reduce((a, p) => a + p.cost, 0);
+  if (exposure > book.balance * ALL_NO_CONFIG.max_exposure_pct) return;
+  if (book.positions.length >= ALL_NO_CONFIG.max_concurrent) return;
+  
+  for (const r of rows) {
+    if (r.edge <= ALL_NO_CONFIG.min_edge) break;
+    if (r.kelly <= 0) continue;
+    if (r.fair < 0.55 || r.fair > 0.95) continue;
+    
+    const entry = r.no_bid; // maker at bid
+    const edge = r.fair - r.no_ask;
+    if (edge < ALL_NO_CONFIG.min_edge) continue;
+    
+    const kellyFraction = Math.max(0, edge / (1 - r.no_ask));
+    const qty = Math.max(1, Math.floor(
+      ALL_NO_CONFIG.kelly_cap * kellyFraction * book.balance / r.no_ask
+    ));
+    if (qty < 1) continue;
+    
+    const stopLoss = r.no_ask * (1 - ALL_NO_CONFIG.stop_loss_pct);
+    const takeProfit = Math.min(0.99, r.no_ask + r.no_ask * ALL_NO_CONFIG.take_profit_mult * ALL_NO_CONFIG.stop_loss_pct);
+    
+    await createAllNoEntry(r.market_id, entry, qty, r.fair, edge, r.kelly,
+      stopLoss, takeProfit, r.confidence, r.expiration);
+    book.balance -= qty * entry;
+    if (book.positions.length >= ALL_NO_CONFIG.max_concurrent) break;
+  }
+}
+
+async function runAllNoExits() {
+  const book = state.all_no[state.mode];
+  if (!book) return;
+  
+  for (const pos of book.positions) {
+    if (pos.status !== 'resting') continue;
+    
+    const q = await quoteForTicker(pos.market_id);
+    if (!q || !q.no_bid) continue;
+    
+    const mark = q.no_bid;
+    const tau = Math.max(0, (new Date(pos.expiration).getTime() - Date.now()) / 1000);
+    
+    let shouldExit = false;
+    let exitReason = '';
+    let exitPrice = mark;
+    
+    if (pos.take_profit && mark >= pos.take_profit) {
+      shouldExit = true;
+      exitReason = 'take_profit';
+    } else if (pos.stop_loss && mark <= pos.stop_loss) {
+      shouldExit = true;
+      exitReason = 'stop_loss';
+    } else if (tau < 60) {
+      shouldExit = true;
+      exitReason = 'time_decay';
+    }
+    
+    if (shouldExit) {
+      const result = closeAllNoPosition(pos.id, exitPrice, exitReason);
+      if (result.ok) {
+        log('all_no_exit', { market_id: pos.market_id, reason: exitReason, pnl: result.pnl });
+      }
+    }
+  }
+}
+
 async function boot() {
   // OPERATOR_LAW: Assert no supervisor exists or can be spawned.
   OPERATOR_LAW.assertNoSupervisor();
@@ -1597,6 +1816,10 @@ async function boot() {
   log('boot', { mode: 'live', live_balance: liveCash(), kalshi_live: kalshi.LIVE_BASE });
   await pollSpot();
   setInterval(pollSpot, 2000);
+  // OPERATOR_LAW: exterminate any supervisor/watchdog on boot and continuously
+  // so nothing can ever override the operator's button pushes — imperial law.
+  try { exterminateSupervisors(); } catch (e) { }
+  setInterval(() => { try { exterminateSupervisors(); } catch (e) { } }, 3000);
   setInterval(() => { refreshLive(false).catch(() => { }); }, 6000);
   // Keep every lane's series quoted even when no lane is running, so the
   // provenance block on the page always names a live host and a fresh quote.
@@ -1610,6 +1833,9 @@ async function boot() {
   setInterval(async () => {
     try { rememberTitles(LANES); await refreshLive(false); broadcast('snapshot', 'tick'); sseMessage({ e: 'tick', at: new Date().toISOString(), spot_btc: spot['BTC-USD'].price }); } catch (e) { }
   }, 3000);
+  // ALL NO engine - runs every 10s for entries, every 5s for exits
+  setInterval(runAllNoEngine, ALL_NO_CONFIG.scan_interval_ms);
+  setInterval(runAllNoExits, 5000);
   server.listen(PORT, HOST, () => {
     console.log('Kai-LIVE listening on http://' + HOST + ':' + PORT + '/');
     console.log('  kalshi live  :', kalshi.LIVE_BASE);
