@@ -1,12 +1,15 @@
-'use strict';
-// Kai-LIVE Brain (LIVE): ensemble signal generators + regime classifier
-// Per-server: LIVE real-money. Same logic as brain_dry.js but with LIVE
-// weights, LIVE confidence thresholds, and the EDGE metric wired through.
-//
+'use strict'
+// ===========================================================================
+// KAI-LIVE BRAIN (LIVE): ensemble signal generators + regime classifier
+// Per-server: LIVE real-money. Uses REAL Kalshi API, REAL Coinbase spot.
 // EDGE metric: EDGE = win_rate * (1 - loss_rate) * normalized_likelihood
-// Thresholds: enter(paper) EDGE > 0.05, execute(live) EDGE > 0.10
+// Thresholds: enter(live) EDGE > 0.10, execute(live) EDGE > 0.10
+// Identity: LIVE - real money, real fills, real P&L
+// ===========================================================================
 
-const crypto = require('crypto');
+const crypto = require("crypto");
+
+const IDENTITY = "LIVE";
 
 module.exports = {
   evaluate,
@@ -20,6 +23,7 @@ module.exports = {
   signalCrossExpiry,
   signalWhale,
   signalBlackScholes,
+  IDENTITY,
 };
 
 // ---------------------------------------------------------------------------
@@ -34,7 +38,7 @@ function edgeMetric(winRate, lossRate, likelihood) {
 
 // ---------------------------------------------------------------------------
 // Signal generators - each returns { side, confidence, edge, reason }
-// side: 'YES' | 'NO' | null (null = no trade)
+// side: "YES" | "NO" | null (null = no trade)
 // confidence: 0-1 (how much to weight this signal)
 // edge: estimated profit per contract
 // ---------------------------------------------------------------------------
@@ -44,27 +48,27 @@ function signalArbitrage(q) {
   if (q.yes_ask == null || q.no_ask == null) return null;
   const gap = 1.0 - (q.yes_ask + q.no_ask);
   if (gap <= 0.0005) return null;
-  return { side: 'YES', confidence: 1.0, edge: gap, reason: 'parity_arbitrage gap=' + gap.toFixed(4) };
+  return { side: "YES", confidence: 1.0, edge: gap, reason: "parity_arbitrage gap=" + gap.toFixed(4) };
 }
 
-// 2. Order Book Imbalance - stale pricing detection
+// 2. Order Book Imbalance - stale pricing detection (LIVE: high weight, real-time)
 function signalImbalance(q, history) {
   if (q.yes_bid_size == null || q.yes_ask_size == null) return null;
   const total = q.yes_bid_size + q.yes_ask_size;
   if (total <= 0) return null;
   const ratio = q.yes_bid_size / total;
   if (ratio < 0.55 && ratio > 0.45) return null;
-  const side = ratio > 0.5 ? 'YES' : 'NO';
-  const conf = Math.min(0.7, 0.3 + Math.abs(ratio - 0.5) * 2);
-  return { side, confidence: conf, edge: 0.003, reason: 'imbalance_' + side + '_ratio=' + ratio.toFixed(2) };
+  const side = ratio > 0.5 ? "YES" : "NO";
+  const conf = Math.min(0.8, 0.4 + Math.abs(ratio - 0.5) * 2);
+  return { side, confidence: conf, edge: 0.003, reason: "imbalance_" + side + "_ratio=" + ratio.toFixed(2) };
 }
 
-// 3. Volume Spike - momentum before price moves
+// 3. Volume Spike - momentum before price moves (LIVE: high weight)
 function signalVolume(q, volWindow) {
   if (q.volume == null) return null;
   if (!volWindow || volWindow.length < 2) {
     if (q.volume > 1000) {
-      return { side: 'YES', confidence: 0.25, edge: 0.002, reason: 'volume_high vol=' + q.volume };
+      return { side: "YES", confidence: 0.3, edge: 0.002, reason: "volume_high vol=" + q.volume };
     }
     return null;
   }
@@ -74,9 +78,9 @@ function signalVolume(q, volWindow) {
   const ratio = recent / avg;
   if (ratio < 1.5) return null;
   const priceMove = recent > 0 ? (q.yes_ask - (volWindow[0] || q.yes_ask)) : 0;
-  const side = priceMove >= 0 ? 'YES' : 'NO';
-  const conf = Math.min(0.7, 0.3 + (ratio - 3) * 0.1);
-  return { side, confidence: conf, edge: 0.006, reason: 'volume_spike ratio=' + ratio.toFixed(1) + 'x' };
+  const side = priceMove >= 0 ? "YES" : "NO";
+  const conf = Math.min(0.8, 0.4 + (ratio - 3) * 0.1);
+  return { side, confidence: conf, edge: 0.006, reason: "volume_spike ratio=" + ratio.toFixed(1) + "x" };
 }
 
 // 4. Cross-Expiration Arbitrage
@@ -84,7 +88,7 @@ function signalCrossExpiry(quotes) {
   if (!quotes || quotes.length < 1) return null;
   const bySeries = {};
   for (const q of quotes) {
-    const s = String(q.ticker).split('-')[0];
+    const s = String(q.ticker).split("-")[0];
     if (!bySeries[s]) bySeries[s] = [];
     bySeries[s].push(q);
   }
@@ -101,12 +105,12 @@ function signalCrossExpiry(quotes) {
     const diff = Math.abs(costPerMinA - costPerMinB);
     if (diff < 0.001) continue;
     const cheaper = costPerMinA < costPerMinB ? a : b;
-    return { side: 'YES', confidence: 0.6, edge: diff * Math.min(tauA, tauB), reason: 'cross_expiry cheaper=' + cheaper.ticker };
+    return { side: "YES", confidence: 0.65, edge: diff * Math.min(tauA, tauB), reason: "cross_expiry cheaper=" + cheaper.ticker };
   }
   return null;
 }
 
-// 5. Whale Tracking - follow large informed trades
+// 5. Whale Tracking - follow large informed trades (LIVE: real fills available)
 function signalWhale(fills, thresholdMultiplier) {
   if (!fills || fills.length < 5) return null;
   const sizes = fills.map(f => f.quantity).filter(q => q > 0);
@@ -117,7 +121,7 @@ function signalWhale(fills, thresholdMultiplier) {
     if (f.quantity > avg * thresholdMultiplier) {
       const tradeTime = new Date(f.at).getTime();
       if (Date.now() - tradeTime > 30000) {
-        return { side: f.side, confidence: 0.55, edge: 0.005, reason: 'whale_' + f.side + '_qty=' + f.quantity };
+        return { side: f.side, confidence: 0.6, edge: 0.005, reason: "whale_" + f.side + "_qty=" + f.quantity };
       }
     }
   }
@@ -137,84 +141,85 @@ function signalBlackScholes(spotPrice, strike, tau, perSecVol) {
   const vol = perSecVol || 0.0001;
   const z = Math.log(spotPrice / strike) / (vol * Math.sqrt(tau));
   const fairUp = normCdf(z);
-  return { side: fairUp > 0.5 ? 'YES' : 'NO', confidence: 0.3, edge: 0.0, reason: 'black_scholes z=' + z.toFixed(3) };
+  return { side: fairUp > 0.5 ? "YES" : "NO", confidence: 0.35, edge: 0.0, reason: "black_scholes z=" + z.toFixed(3) };
 }
 
 // ---------------------------------------------------------------------------
 // Regime classifier - determines which strategies to apply
 // ---------------------------------------------------------------------------
 function classifyRegime(spot, quotes, volWindow) {
-  if (!spot || !quotes || quotes.length === 0) return 'unknown';
+  if (!spot || !quotes || quotes.length === 0) return "unknown";
   const q = quotes[0];
-  if (!q.yes_ask || !q.no_ask) return 'unknown';
+  if (!q.yes_ask || !q.no_ask) return "unknown";
   const spread = q.yes_ask - q.yes_bid;
   const vol = spot.vol_per_sec || 0;
   const tau = Math.max(0, (new Date(q.close_time) - Date.now()) / 1000);
   const gap = 1.0 - (q.yes_ask + q.no_ask);
-  if (gap > 0.003) return 'arbitrage';
-  if (vol > 0.0001 && tau < 300) return 'high_vol';
-  if (spread < 0.005 && vol < 0.00005) return 'low_vol';
-  if (spread > 0.02) return 'wide_spread';
-  return 'normal';
+  if (gap > 0.003) return "arbitrage";
+  if (vol > 0.0001 && tau < 300) return "high_vol";
+  if (spread < 0.005 && vol < 0.00005) return "low_vol";
+  if (spread > 0.02) return "wide_spread";
+  return "normal";
 }
 
 // ---------------------------------------------------------------------------
 // Ensemble evaluation - combines all signals with adaptive weighting
+// Location-aware: receives identity param for LIVE/DRY specific logic
 // ---------------------------------------------------------------------------
 function evaluate(params) {
-  const { q, spotPrice, strike, tau, perSecVol, volWindow, fills, history, quotes, weights } = params;
+  const { q, spotPrice, strike, tau, perSecVol, volWindow, fills, history, quotes, weights, identity = IDENTITY } = params;
   const signals = [];
   const regime = classifyRegime(spotPrice ? { vol_per_sec: perSecVol } : null, quotes, volWindow);
 
-  // Always check arbitrage first - it's risk-free
+  // Always check arbitrage first - it's risk-free (LIVE: highest priority)
   const arb = signalArbitrage(q);
-  if (arb) signals.push(Object.assign(arb, { source: 'arbitrage', weight: weights && weights.arbitrage != null ? weights.arbitrage : 1.0 }));
+  if (arb) signals.push(Object.assign(arb, { source: "arbitrage", weight: weights && weights.arbitrage != null ? weights.arbitrage : 1.0, identity }));
 
-  // Order book imbalance
+  // Order book imbalance (LIVE: highest weight for real-time edge)
   const imb = signalImbalance(q, history);
-  if (imb) signals.push(Object.assign(imb, { source: 'imbalance', weight: weights && weights.imbalance != null ? weights.imbalance : 0.7 }));
+  if (imb) signals.push(Object.assign(imb, { source: "imbalance", weight: weights && weights.imbalance != null ? weights.imbalance : 0.85, identity }));
 
-  // Volume spike
+  // Volume spike (LIVE: high weight for real-time momentum)
   const vol = signalVolume(q, volWindow);
-  if (vol) signals.push(Object.assign(vol, { source: 'volume', weight: weights && weights.volume != null ? weights.volume : 0.6 }));
+  if (vol) signals.push(Object.assign(vol, { source: "volume", weight: weights && weights.volume != null ? weights.volume : 0.75, identity }));
 
-  // Cross-expiry (needs multiple quotes)
+  // Cross-expiry (LIVE: moderate weight, needs multiple quotes)
   if (quotes && quotes.length >= 2) {
     const cross = signalCrossExpiry(quotes);
-    if (cross) signals.push(Object.assign(cross, { source: 'cross_expiry', weight: weights && weights.cross_expiry != null ? weights.cross_expiry : 0.5 }));
+    if (cross) signals.push(Object.assign(cross, { source: "cross_expiry", weight: weights && weights.cross_expiry != null ? weights.cross_expiry : 0.5, identity }));
   }
 
-  // Whale tracking (needs fills)
+  // Whale tracking (LIVE: real fills available, high value)
   if (fills && fills.length >= 5) {
     const whale = signalWhale(fills, 5);
-    if (whale) signals.push(Object.assign(whale, { source: 'whale', weight: weights && weights.whale != null ? weights.whale : 0.4 }));
+    if (whale) signals.push(Object.assign(whale, { source: "whale", weight: weights && weights.whale != null ? weights.whale : 0.5, identity }));
   }
 
-  // Black-Scholes (weak, low weight)
+  // Black-Scholes (LIVE: lower weight, theoretical)
   if (spotPrice && strike && tau > 0) {
     const bs = signalBlackScholes(spotPrice, strike, tau, perSecVol);
-    if (bs) signals.push(Object.assign(bs, { source: 'black_scholes', weight: weights && weights.black_scholes != null ? weights.black_scholes : 0.15 }));
+    if (bs) signals.push(Object.assign(bs, { source: "black_scholes", weight: weights && weights.black_scholes != null ? weights.black_scholes : 0.2, identity }));
   }
 
-  if (signals.length === 0) return { side: null, confidence: 0, edge: 0, reason: 'no signals', regime, signals: [] };
+  if (signals.length === 0) return { side: null, confidence: 0, edge: 0, reason: "no signals", regime, signals: [], identity };
 
   // Weighted ensemble: sum (weight * confidence) per side
   let scoreYes = 0, scoreNo = 0, totalWeight = 0;
   for (const s of signals) {
     const w = s.weight * s.confidence;
     totalWeight += s.weight;
-    if (s.side === 'YES') scoreYes += w;
-    else if (s.side === 'NO') scoreNo += w;
+    if (s.side === "YES") scoreYes += w;
+    else if (s.side === "NO") scoreNo += w;
   }
 
-  if (totalWeight <= 0) return { side: null, confidence: 0, edge: 0, reason: 'no weight', regime, signals };
+  if (totalWeight <= 0) return { side: null, confidence: 0, edge: 0, reason: "no weight", regime, signals, identity };
 
   // Disagreement -> no-trade (side = null)
   if (scoreYes > 0 && scoreNo > 0) {
-    return { side: null, confidence: 0, edge: 0, reason: 'disagreement', regime, signals, scoreYes: Number(scoreYes.toFixed(3)), scoreNo: Number(scoreNo.toFixed(3)) };
+    return { side: null, confidence: 0, edge: 0, reason: "disagreement", regime, signals, identity, scoreYes: Number(scoreYes.toFixed(3)), scoreNo: Number(scoreNo.toFixed(3)) };
   }
 
-  const side = scoreYes > 0 ? 'YES' : 'NO';
+  const side = scoreYes > 0 ? "YES" : "NO";
   const confidence = Math.max(scoreYes, scoreNo) / totalWeight;
   const maxEdge = Math.max(...signals.map(s => s.edge || 0));
 
@@ -222,9 +227,10 @@ function evaluate(params) {
     side,
     confidence: Number(confidence.toFixed(3)),
     edge: Number(maxEdge.toFixed(4)),
-    reason: 'ensemble_' + signals.map(s => s.source).join('+'),
+    reason: "ensemble_" + signals.map(s => s.source).join("+"),
     regime,
     signals,
+    identity,
     scoreYes: Number(scoreYes.toFixed(3)),
     scoreNo: Number(scoreNo.toFixed(3)),
   };
@@ -232,24 +238,33 @@ function evaluate(params) {
 
 // ---------------------------------------------------------------------------
 // Signal stats - track accuracy per signal source for adaptive weighting
+// LIVE: emphasize real-time signals (imbalance, volume, arbitrage)
+// DRY: would be different (more conservative)
 // ---------------------------------------------------------------------------
 function signalStats() {
-  // LIVE weights: emphasize order-book and volume signals (real-time),
-  // de-emphasize cross-expiry (long-dated) and whale (needs confirmed fills)
+  // LIVE weights: emphasize real-time signals for LIVE trading
+  // arbitrage: 1.0 (risk-free, always take)
+  // imbalance: 0.85 (order book edge is real-time and actionable)
+  // volume: 0.75 (momentum before price moves)
+  // cross_expiry: 0.55 (needs multiple quotes)
+  // whale: 0.55 (real fills from LIVE Kalshi)
+  // black_scholes: 0.2 (theoretical, lower confidence)
   return {
     arbitrage: 1.0,
-    imbalance: 0.8,
-    volume: 0.7,
-    cross_expiry: 0.4,
-    whale: 0.35,
-    black_scholes: 0.12,
+    imbalance: 0.85,
+    volume: 0.75,
+    cross_expiry: 0.55,
+    whale: 0.55,
+    black_scholes: 0.2,
   };
 }
 
 // Update weights based on recent trade outcomes
-function updateWeights(currentWeights, outcomes) {
+// Location-aware: tracks outcomes per identity
+function updateWeights(currentWeights, outcomes, identity = IDENTITY) {
   const stats = {};
   for (const o of (outcomes || [])) {
+    if (o.identity !== identity) continue; // Only count outcomes from THIS book
     if (!stats[o.source]) stats[o.source] = { wins: 0, losses: 0 };
     if (o.won) stats[o.source].wins++;
     else stats[o.source].losses++;
