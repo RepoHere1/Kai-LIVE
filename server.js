@@ -1765,7 +1765,7 @@ async function noBook() {
       
       // Edge = fair - ask (we buy NO at ask, fair says NO should be 1-fair)
       const edge = fair - no_ask; // fair is the NO probability; edge = NO fair - NO ask
-      if (edge < 0.004) continue; // MINIMUM 0.4% edge
+      if (edge < 0.01) continue; // 1% edge bar for real money
       
       // Kelly with cap
       const kelly = Math.max(0, edge / (1 - no_ask));
