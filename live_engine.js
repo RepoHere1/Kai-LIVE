@@ -57,10 +57,23 @@ function create(deps) {
       bal.breakdown = (b.balance_breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) }));
       bal.portfolio_value = num(b.portfolio_value_dollars) ?? (num(b.portfolio_value) != null ? num(b.portfolio_value) / 100 : null);
       bal.at = Date.now();
+      const s = st();
+      if (s.live) {
+        s.live.last_balance = { cash: bal.cash, breakdown: bal.breakdown, portfolio_value: bal.portfolio_value, at: bal.at };
+        try { save(); } catch (e) { /* state busy */ }
+      }
       bal.error = null;
     } catch (e) {
       bal.error = String(e.message || e).slice(0, 240);
       log('live_balance_error', { error: bal.error });
+      const s = st();
+      if (s.live && s.live.last_balance && bal.cash == null) {
+        const last = s.live.last_balance;
+        bal.cash = last.cash; bal.breakdown = last.breakdown || [];
+        bal.portfolio_value = last.portfolio_value;
+        bal.at = Number(last.at) || Date.now();
+        bal.stale_from = last.at;
+      }
       if (/429/.test(bal.error)) {
         bal.backoff_until = Date.now() + 60 * 1000;
         setTimeout(() => scheduleBalance(), 60 * 1000 + 500);
