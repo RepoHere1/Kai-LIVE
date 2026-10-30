@@ -1638,7 +1638,16 @@ function getAllNoBook() {
   // The NO book runs in its own ledger: state.all_no['dry'] for paper DRY,
   // state.all_no['dry'] for real-money DRY.
   const mode = state.mode;
-  const book = state.all_no[mode] || { starting_balance: 250, balance: 250, positions: [], closed_trades: [], total_pnl: 0, entries: 0 };
+  const rawBook = state.all_no[mode] || {};
+  const safeNum = (v, d = 0) => { const x = Number(v); return Number.isFinite(x) ? x : d; };
+  const book = {
+    starting_balance: safeNum(rawBook.starting_balance, 250),
+    balance: safeNum(rawBook.balance),
+    positions: rawBook.positions || [],
+    closed_trades: rawBook.closed_trades || [],
+    total_pnl: safeNum(rawBook.total_pnl),
+    entries: safeNum(rawBook.entries),
+  };
   
   // Calculate tallies from closed trades
   const closed = book.closed_trades || [];
@@ -1668,7 +1677,7 @@ function getAllNoBook() {
       side: 'NO',
       entry_price: p.entry_price,
       quantity: p.quantity,
-      cost: Number(p.cost.toFixed(2)),
+      cost: Number(safeNum(p.cost).toFixed(2)),
       entry_fair: p.fair_at_entry || 0.5,
       edge: Number((p.edge_at_entry || 0).toFixed(3)),
       kelly: Number((p.kelly_fraction || 0).toFixed(3)),
@@ -1688,10 +1697,10 @@ function getAllNoBook() {
       entry_price: t.entry_price,
       exit_price: t.exit_price,
       quantity: t.quantity,
-      cost: Number(t.cost.toFixed(2)),
-      proceeds: Number(t.proceeds.toFixed(2)),
-      pnl: Number(t.pnl.toFixed(2)),
-      roi: t.quantity > 0 ? Number(((t.pnl / t.cost) * 100).toFixed(1)) : 0,
+      cost: Number(safeNum(t.cost).toFixed(2)),
+      proceeds: Number(safeNum(t.proceeds).toFixed(2)),
+      pnl: Number(safeNum(t.pnl).toFixed(2)),
+      roi: t.quantity > 0 && safeNum(t.cost) > 0 ? Number(((safeNum(t.pnl) / safeNum(t.cost)) * 100).toFixed(1)) : 0,
       entry_fair: t.fair_at_entry || 0.5,
       kelly: Number((t.kelly_fraction || 0).toFixed(3)),
       fee_paid: Number((t.fee_paid || 0).toFixed(3)),

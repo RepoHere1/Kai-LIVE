@@ -485,7 +485,7 @@ function create(deps) {
       const avg = num(resp && resp.average_fill_price);
       const fee = num(resp && resp.average_fee_paid) ?? 0;
       log('live_exit_order', { strategy: pos.strategy, market: pos.market_id, side: pos.side, reason, bid, qty: pos.qty, filled, avg, order_id: resp && resp.order_id });
-      if (filled > 0) bookExit(pos, filled, avg != null ? avg : bid, fee, reason);
+      if (filled > 0) bookExit(pos, filled, avg != null ? (isYes ? avg : 1 - avg) : bid, fee, reason);
       return { filled };
     } catch (e) {
       log('live_exit_error', { strategy: pos.strategy, market: pos.market_id, reason, error: String(e.message || e).slice(0, 300) });
