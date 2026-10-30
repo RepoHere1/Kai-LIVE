@@ -1553,13 +1553,13 @@ function tradesStats() {
   return { by_fair_band, win_rate: closed.length ? Number((100 * wins / closed.length).toFixed(1)) : 0, wins, losses: closed.length - wins };
 }
 
-function modePayload(book) {
+async function modePayload(book) {
   let dry = null;
   let live = null;
   if (book === 'dry') {
     dry = dryAccountPayload();
   } else {
-    live = liveAccountPayload();
+    live = await liveAccountPayload();
   }
   const b = book || 'dry';
   return {
@@ -1574,28 +1574,6 @@ function modePayload(book) {
     live_full: book === 'live' ? live : dry,
   };
 }
-function liveAccountPayload() {
-  // Return placeholder - browser will fetch real account data via /api/accounts
-  return {
-    book: 'live',
-    label: 'LIVE account - real Kalshi',
-    starting_balance: 0,
-    baseline: 0,
-    cash: null,
-    equity: null,
-    realized: 0,
-    total_pnl: 0,
-    exposure: '0.00',
-    open_positions: 0,
-    closed_trades: 0,
-    wins: 0,
-    losses: 0,
-    win_rate: '0.0%',
-    today: { trades: 0, pnl: 0, win_rate: '0.0%' },
-    curve: { labels: [], pnl: [] }
-  };
-}
-
 function kalshiBlock(book) {
   const b = book || state.mode || 'dry';
   // DRY mode: use paper positions from state.dry, never call real Kalshi account API
@@ -1630,7 +1608,13 @@ function snapshotPayload(book, preloaded) {
   const prov = lastProvenance();
   return {
       book: b,
-      mode: modePayload(b),
+      mode: {
+        mode: b,
+        dry: null,
+        funding: { balance: live ? live.cash : null },
+        no_lanes_enabled: !!state.no_lanes_enabled,
+        live_full: live,
+      },
       balance: live.cash,
       kalshi_age_sec: null ? Math.round((Date.now() - null) / 1000) : null,
       accounts: { live },
@@ -2246,7 +2230,7 @@ async function handle(req, res) {
     if (p === '/api/mode' && method === 'POST') {
       return json(res, { error: 'Kai-LIVE is the LIVE-only server (port 8788). Mode is fixed to live.' }, 403);
     }
-  if (p === '/api/mode') return json(res, modePayload());
+  if (p === '/api/mode') return json(res, await modePayload());
 
   // --- no lanes
   if (p === '/api/no-lanes' && method === 'POST') {
