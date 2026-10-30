@@ -2718,7 +2718,8 @@ function dryBookPayload() {
   const wins = closed.filter(t => t.pnl > 0).length;
   const deployed = positions.reduce((a, p) => a + p.cost, 0);
   const realized = closed.reduce((a, t) => a + (t.pnl || 0), 0);
-  const cash = (await liveCash());
+  // Use starting balance as cash for DRY book
+  const cash = state.dry.starting_balance || 0;
   const starting = state.dry.starting_balance || 0;
   const equity = cash + positions.reduce((a, p) => a + (p.mark != null ? p.qty * p.mark : p.cost), 0);
   return {

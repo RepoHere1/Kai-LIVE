@@ -8,8 +8,8 @@ const path = require('path');
 const crypto = require('crypto');
 
 const HERE = __dirname;
-// Use api.elections.kalshi.com for LIVE (this is the authenticated endpoint)
-const LIVE_BASE = 'https://api.elections.kalshi.com/trade-api/v2';
+// Use api.kalshi.com for LIVE (main Kalshi platform), elections.kalshi.com for elections-only
+const LIVE_BASE = process.env.KALSHI_LIVE_BASE || 'https://api.kalshi.com/trade-api/v2';
 const DEMO_BASE = 'https://demo-api.kalshi.co/trade-api/v2';
 
 function loadEnv(file) {
@@ -107,12 +107,12 @@ const ALL_STRATEGIES = [
   { scheme: 'pkcs1', withQuery: true },
   { scheme: 'pkcs1', withQuery: false },
 ];
-// For portfolio endpoints, force withQuery: false first
+// For portfolio endpoints with shard params, we NEED query string in signature
 const PORTFOLIO_STRATEGIES = [
-  { scheme: 'pss', withQuery: false },   // portfolio: NO query string first
-  { scheme: 'pss', withQuery: true },
-  { scheme: 'pkcs1', withQuery: false },
+  { scheme: 'pss', withQuery: true },   // portfolio WITH query string (for shard params)
+  { scheme: 'pss', withQuery: false },
   { scheme: 'pkcs1', withQuery: true },
+  { scheme: 'pkcs1', withQuery: false },
 ];
 const strategyCache = {}; // key: "acctName:route"
 
@@ -124,11 +124,11 @@ async function raw(acctName, method, route, opts) {
   // Build query params with shard support for live account
   const query = Object.assign({}, opts.query || {});
   if (acctName === 'live' && acct.shards) {
-    // For portfolio endpoints, add exchange_index and subaccount
+    // For portfolio endpoints, add exchange_index and subaccount if not already provided
     const portfolioRoutes = ['/portfolio/balance', '/portfolio/positions', '/portfolio/fills', '/portfolio/orders'];
     if (portfolioRoutes.some(r => route.startsWith(r))) {
-      query.exchange_index = acct.shards.crypto || 0;
-      query.subaccount = acct.subaccount || 0;
+      if (query.exchange_index == null) query.exchange_index = acct.shards.crypto || 0;
+      if (query.subaccount == null) query.subaccount = acct.subaccount || 0;
     }
   }
   
@@ -304,16 +304,58 @@ async function post(route, body) {
 
 // Convenience methods for common queries
 async function portfolio() {
-  const bal = await get('/portfolio/balance', { ttlMs: 4000 });
-  const pos = await get('/portfolio/positions', { query: { limit: 200 }, ttlMs: 8000 });
+  // Fetch from all shards and aggregate using live account (which has shard config)
+  const shards = ['crypto', 'politics', 'sports', 'finance'];
+  let totalBalance = 0;
+  let allPositions = [];
+  let allFills = [];
+  let lastSource = 'demo';
+  let lastHost = DEMO_BASE;
+  
+  for (const shardName of shards) {
+    try {
+      const exchangeIndex = accounts.live.shards[shardName] || 0;
+      const subaccount = accounts.live.subaccount || 0;
+      
+      // Use raw('live', ...) to get shard-specific data
+      const bal = await raw('live', 'GET', '/portfolio/balance', { 
+        query: { exchange_index: exchangeIndex, subaccount: subaccount }, 
+        ttlMs: 4000 
+      });
+      const pos = await raw('live', 'GET', '/portfolio/positions', { 
+        query: { limit: 200, exchange_index: exchangeIndex, subaccount: subaccount }, 
+        ttlMs: 8000 
+      });
+      
+      if (bal && bal.balance_available != null) {
+        totalBalance += Number(bal.balance_available);
+      }
+      if (pos) {
+        allPositions = allPositions.concat(pos);
+      }
+      
+      lastSource = 'live';
+      lastHost = LIVE_BASE;
+    } catch (e) {
+      console.error(`Portfolio fetch failed for shard ${shardName}:`, e.message);
+    }
+  }
+  
+  // Also fetch fills from primary shard (crypto)
   let fills = null;
-  try { fills = await get('/portfolio/fills', { query: { limit: 200 }, ttlMs: 15000 }); } catch (e) { }
+  try { 
+    fills = await raw('live', 'GET', '/portfolio/fills', { 
+      query: { limit: 200, exchange_index: accounts.live.shards.crypto || 0, subaccount: accounts.live.subaccount || 0 }, 
+      ttlMs: 15000 
+    }); 
+  } catch (e) { }
+  
   return {
-    balance: bal.data,
-    positions: pos.data,
-    fills: fills ? fills.data : null,
-    source: bal.source,
-    host: bal.host,
+    balance: { balance_available: totalBalance, balance_total: totalBalance },
+    positions: allPositions,
+    fills: fills || null,
+    source: lastSource,
+    host: lastHost,
   };
 }
 
