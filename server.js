@@ -367,8 +367,8 @@ async function persistApiRequest(ip, path, method, statusCode, responseTimeMs) {
 async function syncStateToDb() {
   try {
     console.log('[syncStateToDb] Starting sync...');
-    const trades = state.dry.closed;
-    const positions = state.dry.positions;
+    const trades = state.live.closed;
+    const positions = state.live.positions;
     const settlements = state.settlement_db;
     const fillQuality = state.fill_quality_db;
     
@@ -623,17 +623,30 @@ function defaultState() {
     },
     runtime: { 
     clip: 5, 
-    min_edge: 0.001,      // DRY: very loose - we want trades for analysis
-    max_price: 0.95,      // DRY: allow higher prices
-    min_price: 0.02,      // DRY: allow very low prices
-    take_profit: 0.90, 
-    stop_loss: 0.25, 
-    kelly_cap: 0.5,       // DRY: higher kelly for more action
-    min_hold_sec: 15,     // DRY: shorter min hold
-    entry_cooldown_sec: 30, // DRY: faster cooldown
-    max_hold_sec: 300, 
-    max_exposure_pct: 0.5, // DRY: higher exposure allowed
-    maker_only: true 
+    min_edge: 0.001,
+    max_price: 0.95,
+    min_price: 0.02,
+    take_profit: 0.90,
+    stop_loss: 0.25,
+    kelly_cap: 0.5,
+    min_hold_sec: 15,
+    entry_cooldown_sec: 30,
+    max_hold_sec: 300,
+    max_exposure_pct: 0.5,
+    // ALL NO MARKETS config
+    all_no: {
+      max_exposure_pct: 0.3,
+      max_concurrent: 10,
+      min_edge: 0.005,
+      min_confidence: 0.3,
+      min_spread: 0.01,
+      max_spread: 0.20,
+      min_tau_sec: 60,
+      max_tau_sec: 3600,
+      max_hold_pct: 0.8,
+      scan_interval_ms: 10000
+    },
+maker_only: true 
   },
   // Lane-specific configurations - self-aware trading logic per lane
   lane_configs: {
@@ -1200,9 +1213,9 @@ async function openLivePosition(lane, q, side, price, fair, edge, sigma) {
 }
 
 function closeDryPosition(pos, exitPrice, reason, result) {
-  const idx = state.dry.positions.indexOf(pos);
+  const idx = state.live.positions.indexOf(pos);
   if (idx === -1) return;
-  state.dry.positions.splice(idx, 1);
+  state.live.positions.splice(idx, 1);
   const proceeds = Number((pos.qty * exitPrice).toFixed(4));
   const pnl = Number((proceeds - pos.cost).toFixed(4));
   
@@ -1225,7 +1238,7 @@ function closeDryPosition(pos, exitPrice, reason, result) {
     settled_price: reason === 'settled' ? exitPrice : null,
     settlement_source: reason === 'settled' ? 'kalshi' : null,
   };
-  state.dry.closed.push(trade);
+  state.live.closed.push(trade);
   
   // Record fill quality
   if (fillQuality != null) {
@@ -1265,10 +1278,10 @@ function closeDryPosition(pos, exitPrice, reason, result) {
 
 
 async function markDryPositions() {
-  const tickers = Array.from(new Set(state.dry.positions.map(p => p.market_id)));
+  const tickers = Array.from(new Set(state.live.positions.map(p => p.market_id)));
   for (const ticker of tickers) {
     const q = await quoteForTicker(ticker);
-    const held = state.dry.positions.filter(p => p.market_id === ticker);
+    const held = state.live.positions.filter(p => p.market_id === ticker);
     if (!q) continue;
     for (const pos of held) {
       if (q.result === 'yes' || q.result === 'no') {
@@ -1388,7 +1401,7 @@ async function engineTick() {
     if (result.confidence < minConf) { ls.skips++; ls.last_skip = 'low confidence (' + result.confidence.toFixed(2) + ' < ' + minConf + ')'; continue; }
 
     // Portfolio heat check (lane-specific exposure)
-    const totalExposure = state.dry.positions.reduce((a, p) => a + p.cost, 0);
+    const totalExposure = state.live.positions.reduce((a, p) => a + (p.cost || 0), 0);
     const maxExposurePct = lc.max_exposure_pct ?? state.runtime.max_exposure_pct ?? 0.3;
     if (totalExposure > (await liveCash()) * maxExposurePct) { ls.skips++; ls.last_skip = 'portfolio heat limit'; continue; }
 
@@ -1402,7 +1415,7 @@ async function engineTick() {
     const cooldown = Number(cooldownSec) * 1000;
     if (lastEntry < cooldown) { ls.skips++; ls.last_skip = 'cooldown ' + Math.ceil((cooldown - lastEntry) / 1000) + 's'; continue; }
 
-    const held = state.dry.positions.filter(p => p.strategy === lane.name).length;
+    const held = state.live.positions.filter(p => p.strategy === lane.name).length;
     if (held >= 1) { ls.skips++; ls.last_skip = 'already holding'; continue; }
 
     // Max hold time check
@@ -1468,29 +1481,11 @@ function liveFillsList() {
     };
   }).filter(f => f.quantity);
 }
-function dryCurve() {
-  const fills = dryFillsList();
-  const byDay = new Map();
-  for (const f of fills) {
-    const day = String(f.at).slice(0, 10);
-    if (!day) continue;
-    // real cash flow: buys are -price*qty, sells are +price*qty
-    const delta = (String(f.action || '').toLowerCase() === 'sell' ? 1 : -1) * (f.price || 0) * f.quantity;
-    byDay.set(day, (byDay.get(day) || 0) + delta);
-  }
-  const labels = Array.from(byDay.keys()).sort();
-  let run = 0;
-  const pnl = labels.map(d => { run += byDay.get(d); return Number(run.toFixed(2)); });
-  return { labels, pnl };
-}
 
-// ---------------------------------------------------------------------------
-// Strategy cards / stats
-// ---------------------------------------------------------------------------
-function laneTrades(name) { return state.dry.closed.filter(t => t.strategy === name); }
-function dryTrades(name) {
-  return (state.dry.closed || {}).fills
-    ? dryFillsList().filter(t => t.strategy === name)
+function laneTrades(name) { return state.live.closed.filter(t => t.strategy === name); }
+function liveTrades(name) {
+  return (state.live.closed || {}).fills
+    ? liveFillsList().filter(t => t.strategy === name)
     : [];
 }
 function cards() {
@@ -1498,12 +1493,12 @@ function cards() {
     const ls = laneState(lane.name);
     const closed = laneTrades(lane.name);
     const wins = closed.filter(t => t.pnl > 0).length;
-    const open = state.dry.positions.filter(p => p.strategy === lane.name);
+    const open = state.live.positions.filter(p => p.strategy === lane.name);
     const equity = curveFor(closed);
     const heartbeatAge = ls.heartbeat ? Math.round((Date.now() - new Date(ls.heartbeat).getTime()) / 1000) : null;
-    const dryOpen = dryPositions().filter(p => p.strategy === lane.name);
-    const dryClosed = dryFillsList().filter(t => t.strategy === lane.name);
-    const dryWins = dryClosed.filter(t => (t.price || 0) * t.quantity > 0).length;
+    const liveOpen = livePositions().filter(p => p.strategy === lane.name);
+    const liveClosed = liveFillsList().filter(t => t.strategy === lane.name);
+    const liveWins = liveClosed.filter(t => (t.price || 0) * t.quantity > 0).length;
     return {
       name: lane.name,
       label: lane.label,
@@ -1522,10 +1517,10 @@ function cards() {
       book: state.mode,
       heartbeat: ls.heartbeat,
       // DRY book stats (read-only, from real Kalshi fills)
-      live_trades: dryClosed.length,
-      live_win_rate: dryClosed.length ? Number((100 * dryWins / dryClosed.length).toFixed(1)) : 0,
-      live_open: dryOpen.length,
-      live_realized: Number(dryClosed.reduce((a, t) => a + ((t.price || 0) * t.quantity), 0).toFixed(2)),
+      live_trades: liveClosed.length,
+      live_win_rate: liveClosed.length ? Number((100 * liveWins / liveClosed.length).toFixed(1)) : 0,
+      live_open: liveOpen.length,
+      live_realized: Number(liveClosed.reduce((a, t) => a + ((t.price || 0) * t.quantity), 0).toFixed(2)),
     };
   });
 }
@@ -1541,7 +1536,7 @@ function curveFor(closed) {
   return { labels, pnl: labels.map(d => { run += byDay.get(d); return Number(run.toFixed(2)); }) };
 }
 function tradesStats() {
-  const closed = state.dry.closed;
+  const closed = state.live.closed;
   const bands = [
     { band: '0.00-0.20', lo: 0, hi: 0.20 }, { band: '0.20-0.40', lo: 0.2, hi: 0.4 },
     { band: '0.40-0.60', lo: 0.4, hi: 0.6 }, { band: '0.60-0.80', lo: 0.6, hi: 0.8 },
@@ -1561,30 +1556,25 @@ function tradesStats() {
 }
 
 async function modePayload(book) {
-  let dry = null;
   let live = null;
   if (book === 'dry') {
-    dry = dryAccountPayload();
+    return { mode: 'dry', dry: null, funding: { balance: null }, no_lanes_enabled: !!state.no_lanes_enabled, live_full: null };
   } else {
     live = await liveAccountPayload();
   }
   const b = book || 'dry';
   return {
     mode: b,
-    dry: dry ? {
-      cash: dry.cash, open_positions: dry.open_positions, total_pnl: dry.total_pnl,
-      portfolio_value: dry.portfolio_value, equity: dry.equity, realized: dry.realized,
-      exposure: dry.exposure, closed_trades: dry.closed_trades, error: dry.error,
-    } : null,
-    funding: { balance: book === 'dry' ? (dry ? dry.cash : null) : (live ? live.cash : null) },
+    dry: null,
+    funding: { balance: live ? live.cash : null },
     no_lanes_enabled: !!state.no_lanes_enabled,
-    live_full: book === 'live' ? live : dry,
+    live_full: live,
   };
 }
 function kalshiBlock(book) {
   const b = book || state.mode || 'dry';
-  // DRY mode: use paper positions from state.dry, never call real Kalshi account API
-  const markets = state.dry.positions.map(p => ({
+  // LIVE mode: use real Kalshi positions from portfolio API
+  const markets = state.live.positions.map(p => ({
     ticker: p.market_id, shares: p.side === 'YES' ? p.qty : -p.qty,
     exposure: p.cost, traded: p.qty, realized: null, fees: 0,
   }));
@@ -1593,8 +1583,8 @@ function kalshiBlock(book) {
     market_count: markets.length, event_count: 0,
     exposure: Number(deployed().toFixed(2)), fees: 0, realized: null,
     cost_basis_known: true, cost_basis: Number(deployed().toFixed(2)),
-    ledger: { sales_realized: null, settlement_realized: Number(dryRealized().toFixed(2)), window_start: (state.dry.closed[0] || {}).exit_timestamp || null },
-    source: 'dry book (paper positions)', host: null,
+    ledger: { sales_realized: null, settlement_realized: Number(liveRealized().toFixed(2)), window_start: (state.live.closed[0] || {}).exit_timestamp || null },
+    source: 'live book (real Kalshi positions)', host: null,
   };
 }
 
@@ -1605,8 +1595,8 @@ function rememberTitles(lanes) {
     if (!res || !res.markets) continue;
     for (const m of res.markets) if (m.title) TITLES[m.ticker] = m.title;
   }
-  for (const p of state.dry.positions) if (p.title) TITLES[p.market_id] = p.title;
-  for (const t of state.dry.closed) if (t.title) TITLES[t.market_id] = t.title;
+  for (const p of state.live.positions) if (p.title) TITLES[p.market_id] = p.title;
+  for (const t of state.live.closed) if (t.title) TITLES[t.market_id] = t.title;
 }
 
 function snapshotPayload(book, preloaded) {
@@ -2331,7 +2321,7 @@ async function handle(req, res) {
     const ls = laneState(name);
     const closed = laneTrades(name);
     const wins = closed.filter(t => t.pnl > 0).length;
-    const open = state.dry.positions.filter(p2 => p2.strategy === name);
+    const open = state.live.positions.filter(p2 => p2.strategy === name);
     const rets = closed.map(t => t.pnl);
     const card = cards().find(c => c.name === name);
     const act = await activeQuote(lane);
@@ -2366,7 +2356,7 @@ async function handle(req, res) {
     const page = Math.max(1, Number(u.searchParams.get('page') || 1));
     const per = Math.max(1, Math.min(200, Number(u.searchParams.get('per_page') || 25)));
     const book = u.searchParams.get('book') === 'dry' ? 'dry' : 'dry';
-    const all = state.dry.closed.slice().reverse();
+    const all = state.live.closed.slice().reverse();
     const total = all.length;
     const pages = Math.max(1, Math.ceil(total / per));
     const slice = all.slice((page - 1) * per, page * per);
@@ -2375,7 +2365,7 @@ async function handle(req, res) {
 
   // --- monitoring panels data
   if (p === '/api/monitoring') {
-    const closed = state.dry.closed;
+    const closed = state.live.closed;
     
     // 1. Edge decay: entry_edge vs exit_edge
     const edgeDecay = closed.map(t => ({
@@ -2538,6 +2528,7 @@ async function handle(req, res) {
   }
 
   // --- accounts
+    // --- accounts
   if (p === '/api/accounts') {
     const book = state.mode || 'live';
     if (book === 'live') {
@@ -2563,7 +2554,6 @@ async function handle(req, res) {
       return json(res, { accounts: { live: {} }, current: 'live', provenance: lastProvenance() });
     }
   }
-
   if (p === '/api/llm/usage') {
     const u2 = kilo.usage();
     return json(res, Object.assign({ model: ENV.KILO_MODEL || 'auto/free', base: ENV.KILO_BASE_URL }, u2));
@@ -2659,7 +2649,7 @@ async function handle(req, res) {
 }
 
 function analysisPayload(strategy) {
-  const closed = strategy ? laneTrades(strategy) : state.dry.closed;
+  const closed = strategy ? laneTrades(strategy) : state.live.closed;
   const rets = closed.map(t => t.pnl);
   const wins = closed.filter(t => t.pnl > 0).length;
   const byKey = (fn) => {
@@ -2704,74 +2694,6 @@ function analysisPayload(strategy) {
   };
 }
 
-function dryBookPayload() {
-  const positions = state.dry.positions || [];
-  const closed = state.dry.closed || [];
-  const wins = closed.filter(t => t.pnl > 0).length;
-  const deployed = positions.reduce((a, p) => a + p.cost, 0);
-  const realized = closed.reduce((a, t) => a + (t.pnl || 0), 0);
-  // Use starting balance as cash for DRY book
-  const cash = state.dry.starting_balance || 0;
-  const starting = state.dry.starting_balance || 0;
-  const equity = cash + positions.reduce((a, p) => a + (p.mark != null ? p.qty * p.mark : p.cost), 0);
-  return {
-    book: 'dry',
-    label: 'DRY account - real money',
-    starting_balance: starting,
-    cash: Number(cash.toFixed(4)),
-    equity: Number(equity.toFixed(4)),
-    realized: Number(realized.toFixed(2)),
-    total_pnl: Number((equity - starting).toFixed(2)),
-    exposure: Number(deployed.toFixed(2)),
-    open_positions: positions.length,
-    closed_trades: closed.length,
-    wins, losses: closed.length - wins,
-    win_rate: closed.length ? Number((100 * wins / closed.length).toFixed(1)) : 0,
-    today: todayStats(closed),
-    curve: curveFromClosed(closed),
-    positions: positions.map(p => ({
-      market_id: p.market_id, side: p.side, entry_price: p.entry_price,
-      quantity: p.qty, strategy: p.strategy, stop_loss: p.stop_loss,
-      take_profit: p.take_profit, opened: p.opened, order_id: p.order_id,
-    })),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
-const server = http.createServer((req, res) => {
-  handle(req, res).catch(e => { try { json(res, { error: String(e.message || e) }, 500); } catch (_) { } });
-});
-
-// Prevent process exit on unhandled errors
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err.stack || err.message || err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection:', reason && reason.stack ? reason.stack : reason);
-});
-
-// Runtime config for ALL NO engine and lane improvements
-const ALL_NO_CONFIG = {
-  scan_interval_ms: 15000,        // slower scan, higher quality
-  max_concurrent: 5,              // fewer concurrent positions
-  max_exposure_pct: 0.2,          // 20% max exposure
-  kelly_cap: 0.25,                // 25% Kelly cap
-  min_edge: 0.008,                // 0.8% minimum edge (was 0.1%)
-  min_vol: 0.0001,
-  max_gap: 0.01,
-  maker_only: true,
-  trail_pct: 0.5,
-  max_hold_pct: 0.75,             // exit at 75% lifetime
-  stop_loss_pct: 0.15,            // 15% base stop
-  take_profit_mult: 2.5,          // 2.5:1 reward:risk
-  min_spread: 0.005,              // minimum spread
-  max_spread: 0.04,               // maximum spread
-  min_tau_sec: 30,                // minimum time to expiry
-  max_tau_sec: 3600,              // maximum time to expiry
-  min_confidence: 0.4,            // minimum confidence
-};
 
 async function runAllNoEngine() {
   if (!state.no_lanes_enabled) return;
@@ -2784,15 +2706,15 @@ async function runAllNoEngine() {
   
   // Portfolio heat check
   const exposure = book.positions.reduce((a, p) => a + p.cost, 0);
-  if (exposure > book.balance * ALL_NO_CONFIG.max_exposure_pct) return;
-  if (book.positions.length >= ALL_NO_CONFIG.max_concurrent) return;
+  if (exposure > book.balance * state.runtime.all_no.max_exposure_pct) return;
+  if (book.positions.length >= state.runtime.all_no.max_concurrent) return;
   
   for (const r of rows) {
-    if (r.edge < ALL_NO_CONFIG.min_edge) continue;
+    if (r.edge < state.runtime.all_no.min_edge) continue;
     if (r.kelly <= 0) continue;
-    if (r.confidence < ALL_NO_CONFIG.min_confidence) continue;
-    if (r.spread < ALL_NO_CONFIG.min_spread || r.spread > ALL_NO_CONFIG.max_spread) continue;
-    if (r.tau < ALL_NO_CONFIG.min_tau_sec || r.tau > ALL_NO_CONFIG.max_tau_sec) continue;
+    if (r.confidence < state.runtime.all_no.min_confidence) continue;
+    if (r.spread < state.runtime.all_no.min_spread || r.spread > state.runtime.all_no.max_spread) continue;
+    if (r.tau < state.runtime.all_no.min_tau_sec || r.tau > state.runtime.all_no.max_tau_sec) continue;
     
     // Use pre-calculated values from noBook
     const entry = r.limit_entry; // maker at bid
@@ -2805,7 +2727,7 @@ async function runAllNoEngine() {
     await createAllNoEntry(r.market_id, entry, qty, r.fair, r.edge, r.kelly,
       r.stop, r.take_profit, r.confidence, r.expiration);
     
-    if (book.positions.length >= ALL_NO_CONFIG.max_concurrent) break;
+    if (book.positions.length >= state.runtime.all_no.max_concurrent) break;
   }
 }
 
@@ -2837,7 +2759,7 @@ async function runAllNoExits() {
     } else if (pos.stop_loss && mark <= pos.stop_loss) {
       shouldExit = true;
       exitReason = 'stop_loss';
-    } else if (lifePct > ALL_NO_CONFIG.max_hold_pct) {
+    } else if (lifePct > state.runtime.all_no.max_hold_pct) {
       shouldExit = true;
       exitReason = 'time_decay';
     }
@@ -2967,7 +2889,7 @@ async function boot() {
   }, 3000);
 
   // ALL NO engine - runs every 10s for entries, every 5s for exits
-  setInterval(runAllNoEngine, ALL_NO_CONFIG.scan_interval_ms);
+  setInterval(runAllNoEngine, state.runtime.all_no.scan_interval_ms);
   setInterval(runAllNoExits, 5000);
 
   // Kalshi WebSocket for real-time market data (replaces 2s polling)
@@ -2999,6 +2921,7 @@ async function boot() {
   });
 }
 
+const server = http.createServer(handle);
 
 if (require.main === module) {
   boot().catch(e => {
