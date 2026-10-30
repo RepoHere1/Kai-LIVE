@@ -321,6 +321,75 @@ button.loading.yellow::after {
   background: conic-gradient(from 0deg, rgba(255,215,0,0.3), rgba(255,237,78,0.6), transparent);
   animation: borderSpinYellow 1.2s linear infinite;
 }
+
+/* Monitoring Panels */
+.monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.monitor-card {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+.monitor-card h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.monitor-card .note {
+  font-size: 10px;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+.monitor-card table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.monitor-card th {
+  text-align: left;
+  padding: 4px 6px;
+  font-weight: 600;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+.monitor-card td {
+  padding: 4px 6px;
+  color: var(--fg);
+  border-bottom: 1px solid var(--line2);
+}
+.monitor-card td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-card .up { color: var(--up); }
+.monitor-card .down { color: var(--down); }
+.monitor-card .flat { color: var(--fg); }
+.monitor-card button {
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  background: var(--blue);
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.monitor-card button:hover {
+  background: var(--blue);
+  opacity: 0.9;
+}
+#noHeatmap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 8px;
+}
 </style>
 </head>
 <body data-mode="dry">
@@ -363,11 +432,8 @@ button.loading.yellow::after {
   <div class="stamp">Rendered 2026-10-19 11:57:21</div>
 </header>
 
-
-
-
-
-
+<!-- ============ spacer ============ -->
+<div class="row" style="height:18px;margin-bottom:0"></div>
 
 <!-- ============ headline tiles ============ -->
 
@@ -887,79 +953,8 @@ button.loading.yellow::after {
 <div class="row half">
   <div class="panel">
     <div class="ph"><h2>Strategy performance</h2><span class="note">closed trades by strategy</span></div>
-    <table><thead><tr><th>Strategy</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">P&amp;L</th><th class="num">Best</th><th class="num">Worst</th></tr></thead><tbody>
-      <tr>
-        <td><span class="tag">btc_updown</span></td>
-        <td class="num">1119</td>
-        <td class="num">75.4%</td>
-        <td class="num up">176.33</td>
-        <td class="num up">34.33</td>
-        <td class="num down">-25.79</td>
-      </tr>
-      <tr>
-        <td><span class="tag">hyperliquid_updown</span></td>
-        <td class="num">1064</td>
-        <td class="num">70.4%</td>
-        <td class="num up">143.99</td>
-        <td class="num up">39.88</td>
-        <td class="num down">-57.55</td>
-      </tr>
-      <tr>
-        <td><span class="tag">btc_1h_updown</span></td>
-        <td class="num">667</td>
-        <td class="num">65.1%</td>
-        <td class="num up">80.72</td>
-        <td class="num up">51.54</td>
-        <td class="num down">-76.02</td>
-      </tr>
-      <tr>
-        <td><span class="tag">eth_1h_updown</span></td>
-        <td class="num">409</td>
-        <td class="num">55.3%</td>
-        <td class="num up">52.77</td>
-        <td class="num up">35.47</td>
-        <td class="num down">-22.82</td>
-      </tr>
-      <tr>
-        <td><span class="tag">xrp_updown</span></td>
-        <td class="num">842</td>
-        <td class="num">77.7%</td>
-        <td class="num up">36.87</td>
-        <td class="num up">9.11</td>
-        <td class="num down">-41.45</td>
-      </tr>
-      <tr>
-        <td><span class="tag">eth_updown</span></td>
-        <td class="num">152</td>
-        <td class="num">77.0%</td>
-        <td class="num up">6.3</td>
-        <td class="num up">0.52</td>
-        <td class="num down">-0.15</td>
-      </tr>
-      <tr>
-        <td><span class="tag">hyperliquid_1h_updown</span></td>
-        <td class="num">71</td>
-        <td class="num">71.8%</td>
-        <td class="num up">3.35</td>
-        <td class="num up">1.2</td>
-        <td class="num down">-0.15</td>
-      </tr>
-      <tr>
-        <td><span class="tag">xrp_1h_updown</span></td>
-        <td class="num">135</td>
-        <td class="num">55.6%</td>
-        <td class="num down">-135.95</td>
-        <td class="num up">8.58</td>
-        <td class="num down">-63.97</td>
-      </tr>
-      <tr>
-        <td><span class="tag">xau_updown</span></td>
-        <td class="num">479</td>
-        <td class="num">49.3%</td>
-        <td class="num down">-183.62</td>
-        <td class="num up">8.92</td>
-        <td class="num down">-77.04</td>
-      </tr>
+    <table><thead><tr><th>Strategy</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">P&L</th><th class="num">Best</th><th class="num">Worst</th></tr></thead><tbody id="strategyPerfBody">
+      <tr><td colspan="6" class="empty">Loading&hellip;</td></tr>
     </tbody></table>
   </div>
 
@@ -1777,11 +1772,36 @@ function paint(s) {
 
   SNAPSHOT.equity = s.equity || SNAPSHOT.equity;
   paintCards(s.strategy_cards);
+  paintStrategyPerformance(s.strategy_cards);
   const eq = SNAPSHOT.equity || {};
   const closes = (eq.pnl || []).length;
   set('pnlSummary', closes
     ? closes + ' closed trades'
     : 'no closed trades yet');
+}
+
+function paintStrategyPerformance(cards) {
+  const body = $('strategyPerfBody');
+  if (!body || !cards) return;
+  if (!cards.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">No strategies with closed trades yet</td></tr>';
+    return;
+  }
+  body.innerHTML = cards.map(function (c) {
+    if (!c.trades || c.trades === 0) return '';
+    var pnlArr = (c.equity && c.equity.pnl) || [];
+    var best = pnlArr.length ? Math.max.apply(null, pnlArr) : 0;
+    var worst = pnlArr.length ? Math.min.apply(null, pnlArr) : 0;
+    var pnl = c.realized || 0;
+    return '<tr>' +
+      '<td><span class="tag">' + esc(c.name) + '</span></td>' +
+      '<td class="num">' + c.trades + '</td>' +
+      '<td class="num">' + (c.win_rate || 0) + '%</td>' +
+      '<td class="num ' + (pnl > 0 ? 'up' : (pnl < 0 ? 'down' : 'flat')) + '">' + money(pnl) + '</td>' +
+      '<td class="num ' + (best > 0 ? 'up' : (best < 0 ? 'down' : 'flat')) + '">' + money(best) + '</td>' +
+      '<td class="num ' + (worst > 0 ? 'up' : (worst < 0 ? 'down' : 'flat')) + '">' + money(worst) + '</td>' +
+    '</tr>';
+  }).join('');
 }
 
 function paintCards(cards) {
@@ -2186,8 +2206,8 @@ function paintMarket(md) {
     kp.textContent = contract ? 'quoted' : 'no quote';
   }
   const set15 = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-  set15('k15Up', contract && contract.up_ask != null ? Math.round(contract.up_ask * 100) + 'Â¢' : '--');
-  set15('k15Down', contract && contract.down_ask != null ? Math.round(contract.down_ask * 100) + 'Â¢' : '--');
+  set15('k15Up', contract && contract.up_ask != null ? Math.round(contract.up_ask * 100) + '¢' : '--');
+  set15('k15Down', contract && contract.down_ask != null ? Math.round(contract.down_ask * 100) + '¢' : '--');
   set15('k15Target', contract && contract.target != null ? '$' + Number(contract.target).toLocaleString() : '--');
   // Countdown runs locally between polls so it ticks smoothly instead of
   // jumping every five seconds.
@@ -2635,7 +2655,257 @@ safeRun(loadLogs, 'loadLogs');
 
 safeRun(refresh, 'refresh');
 safeRun(refreshFeeds, 'refreshFeeds');
+
+// --- Monitoring Panels ---
+async function loadMonitoring() {
+  try {
+    const r = await fetch('/api/ai/analyze', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ strategy: 'book', query_type: 'monitoring' })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.error) { note('Monitoring: ' + d.error); return; }
+    renderMonitoringPanels(d);
+  } catch (e) {
+    console.warn('Monitoring load failed:', e);
+  }
+}
+
+function renderMonitoringPanels(d) {
+  const container = $('monitoringContainer');
+  if (!container) return;
+
+  // 1. Edge Decay Curve
+  let html = '<div class="monitor-grid">';
+  
+  if (d.by_exit_reason) {
+    html += '<div class="monitor-card">';
+    html += '<h3>Exit Reason Breakdown</h3>';
+    html += '<table><thead><tr><th>Reason</th><th class="num">Trades</th></tr></thead><tbody>';
+    for (const r of d.by_exit_reason) {
+      html += '<tr><td>' + esc(r.reason) + '</td><td class="num">' + r.trades + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // 2. Regime Win Rate
+  if (d.by_regime) {
+    html += '<div class="monitor-card">';
+    html += '<h3>Regime Win Rate</h3>';
+    html += '<table><thead><tr><th>Regime</th><th class="num">Trades</th><th class="num">Win Rate</th><th class="num">P&L</th></tr></thead><tbody>';
+    for (const r of d.by_regime) {
+      const pnlCls = r.pnl > 0 ? 'up' : (r.pnl < 0 ? 'down' : 'flat');
+      html += '<tr><td>' + esc(r.regime) + '</td><td class="num">' + r.trades + '</td><td class="num">' + r.win_rate + '%</td><td class="num ' + pnlCls + '">' + money(r.pnl) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // 3. Signal Attribution
+  if (d.by_signal) {
+    html += '<div class="monitor-card">';
+    html += '<h3>Signal Attribution</h3>';
+    html += '<table><thead><tr><th>Signal</th><th class="num">Trades</th><th class="num">Win Rate</th><th class="num">P&L</th></tr></thead><tbody>';
+    for (const r of d.by_signal) {
+      const pnlCls = r.pnl > 0 ? 'up' : (r.pnl < 0 ? 'down' : 'flat');
+      html += '<tr><td>' + esc(r.signal) + '</td><td class="num">' + r.trades + '</td><td class="num">' + r.win_rate + '%</td><td class="num ' + pnlCls + '">' + money(r.pnl) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // 4. Kelly Efficiency
+  if (d.kelly_efficiency) {
+    html += '<div class="monitor-card">';
+    html += '<h3>Kelly Efficiency</h3>';
+    html += '<table><thead><tr><th>Metric</th><th class="num">Value</th></tr></thead><tbody>';
+    for (const [k, v] of Object.entries(d.kelly_efficiency)) {
+      html += '<tr><td>' + esc(k) + '</td><td class="num">' + (typeof v === 'number' ? v.toFixed(3) : esc(v)) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // 5. Execution Quality
+  if (d.execution_quality) {
+    html += '<div class="monitor-card">';
+    html += '<h3>Execution Quality (maker fill %)<span class="note">≤0 is maker</span></h3>';
+    html += '<table><thead><tr><th>Metric</th><th class="num">Value</th></tr></thead><tbody>';
+    for (const [k, v] of Object.entries(d.execution_quality)) {
+      const cls = v <= 0 ? 'up' : 'down';
+      html += '<tr><td>' + esc(k) + '</td><td class="num ' + cls + '">' + (typeof v === 'number' ? v.toFixed(4) : esc(v)) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // 6. ALL NO Heatmap placeholder
+  html += '<div class="monitor-card">';
+  html += '<h3>ALL NO Heatmap</h3>';
+  html += '<p class="note">Edge vs Tau vs Fair (click to expand)</p>';
+  html += '<button onclick="toggleNoHeatmap()">Show Heatmap</button>';
+  html += '<div id="noHeatmap" style="display:none"></div>';
+  html += '</div>';
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Toggle NO heatmap
+async function toggleNoHeatmap() {
+  const div = $('noHeatmap');
+  if (!div) return;
+  if (div.style.display === 'none') {
+    div.style.display = '';
+    try {
+      const r = await fetch('/api/no-lanes/book');
+      const d = await r.json();
+      renderNoHeatmap(d);
+    } catch (e) { div.innerHTML = '<p class="note">Failed to load</p>'; }
+  } else {
+    div.style.display = 'none';
+  }
+}
+
+function renderNoHeatmap(d) {
+  const div = $('noHeatmap');
+  if (!div || !d.open_rows) { div.innerHTML = '<p class="note">No data</p>'; return; }
+  
+  // Group by edge buckets
+  const buckets = {};
+  for (const row of d.open_rows) {
+    const edgeBucket = Math.floor((row.edge || 0) * 100) / 100;
+    if (!buckets[edgeBucket]) buckets[edgeBucket] = { count: 0, totalEdge: 0, totalQty: 0 };
+    buckets[edgeBucket].count++;
+    buckets[edgeBucket].totalEdge += row.edge || 0;
+    buckets[edgeBucket].totalQty += row.quantity || 0;
+  }
+  
+  let html = '<table><thead><tr><th>Edge</th><th>Positions</th><th>Avg Edge</th><th>Total Qty</th></tr></thead><tbody>';
+  for (const [edge, b] of Object.entries(buckets).sort()) {
+    html += '<tr><td>' + edge + '</td><td class="num">' + b.count + '</td><td class="num">' + (b.totalEdge / b.count).toFixed(4) + '</td><td class="num">' + b.totalQty + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  div.innerHTML = html;
+}
+
+// Run monitoring on load and every 60s
+  setTimeout(loadMonitoring, 1000);
+  setInterval(loadMonitoring, 60000);
+
+  // --- New Monitoring Panels ---
+  async function loadMonitoringPanels() {
+    try {
+      const r = await fetch('/api/monitoring');
+      const d = await r.json();
+      if (!d) return;
+
+      // Edge Decay Chart
+      if (d.edge_decay && $('edgeDecayChart')) {
+        drawEdgeDecayChart(d.edge_decay);
+      }
+
+      // Regime Win Rate
+      if (d.regime_win_rate && $('regimeWinRateBody')) {
+        $('regimeWinRateBody').innerHTML = d.regime_win_rate.map(r => 
+          '<tr><td>' + esc(r.regime) + '</td><td class="num">' + r.trades + '</td><td class="num">' + r.wins + '</td><td class="num">' + r.win_rate + '%</td><td class="num">' + r.avg_edge.toFixed(4) + '</td></tr>'
+        ).join('');
+      }
+
+      // Signal Attribution
+      if (d.signal_attribution && $('signalAttrBody')) {
+        $('signalAttrBody').innerHTML = d.signal_attribution.map(r => 
+          '<tr><td>' + esc(r.signal) + '</td><td class="num">' + r.trades + '</td><td class="num">' + r.wins + '</td><td class="num">' + r.win_rate + '%</td><td class="num">' + r.weight.toFixed(2) + '</td></tr>'
+        ).join('');
+      }
+
+      // Kelly Efficiency
+      if (d.kelly_efficiency && $('kellyEffBody')) {
+        $('kellyEffBody').innerHTML = d.kelly_efficiency.map(r => 
+          '<tr><td>' + esc(r.trade) + '</td><td class="num">' + (r.kelly_pct * 100).toFixed(1) + '%</td><td class="num">' + (r.actual_pct * 100).toFixed(1) + '%</td><td class="num ' + (r.efficiency >= 1 ? 'up' : 'down') + '">' + r.efficiency.toFixed(2) + '</td><td class="num">' + r.edge.toFixed(4) + '</td></tr>'
+        ).join('');
+      }
+
+      // Execution Quality
+      if (d.execution_quality && $('execQualityBody')) {
+        $('execQualityBody').innerHTML = d.execution_quality.map(r => 
+          '<tr><td>' + esc(r.market) + '</td><td>' + esc(r.side) + '</td><td class="num">' + r.bid.toFixed(3) + '</td><td class="num">' + r.ask.toFixed(3) + '</td><td class="num">' + r.fill.toFixed(3) + '</td><td class="num ' + (r.quality <= 0 ? 'up' : 'down') + '">' + r.quality.toFixed(4) + '</td></tr>'
+        ).join('');
+      }
+
+      // ALL NO Heatmap
+      if (d.all_no_heatmap && $('allNoHeatmapChart')) {
+        drawAllNoHeatmap(d.all_no_heatmap);
+      }
+    } catch (e) {
+      console.error('loadMonitoringPanels failed:', e);
+    }
+  }
+
+  function drawEdgeDecayChart(data) {
+    const ctx = $('edgeDecayChart').getContext('2d');
+    if (window.edgeDecayChart) window.edgeDecayChart.destroy();
+    window.edgeDecayChart = new Chart(ctx, {
+      type: 'scatter',
+      data: { datasets: [{
+        label: 'Edge at Entry vs Exit',
+        data: data.map(d => ({ x: d.entry_edge, y: d.exit_edge })),
+        backgroundColor: 'rgba(255, 165, 0, 0.6)',
+        borderColor: 'rgba(255, 165, 0, 1)',
+        pointRadius: 4
+      }]},
+      options: { 
+        responsive: true, 
+        maintainAspectRatio: false,
+        scales: { 
+          x: { title: { display: true, text: 'Edge at Entry' } },
+          y: { title: { display: true, text: 'Edge at Exit' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  function drawAllNoHeatmap(data) {
+    const ctx = $('allNoHeatmapChart').getContext('2d');
+    if (window.allNoHeatmapChart) window.allNoHeatmapChart.destroy();
+    const maxEdge = Math.max(...data.map(d => d.edge));
+    window.allNoHeatmapChart = new Chart(ctx, {
+      type: 'scatter',
+      data: { datasets: [{
+        label: 'Edge vs Tau',
+        data: data.map(d => ({ x: d.tau / 60, y: d.fair, edge: d.edge })),
+        backgroundColor: data.map(d => 'rgba(255, 165, 0, ' + (0.3 + 0.7 * (d.edge / maxEdge)) + ')'),
+        borderColor: data.map(d => 'rgba(255, 165, 0, ' + (0.5 + 0.5 * (d.edge / maxEdge)) + ')'),
+        pointRadius: 6
+      }]},
+      options: { 
+        responsive: true, 
+        maintainAspectRatio: false,
+        scales: { 
+          x: { title: { display: true, text: 'Time to Expiry (min)' } },
+          y: { title: { display: true, text: 'Model Fair' } }
+        },
+        plugins: { 
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => 'Edge: ' + ctx.raw.edge.toFixed(4) + ', Fair: ' + ctx.raw.y.toFixed(3) + ', Tau: ' + (ctx.raw.x).toFixed(1) + 'min' } }
+        }
+      }
+    });
+  }
+
+  // Run new monitoring
+  setTimeout(loadMonitoringPanels, 2000);
+  setInterval(loadMonitoringPanels, 60000);
 </script>
+  <!-- Monitoring Panels -->
+  <div class="panel" id="monitoringPanel" style="margin-bottom:12px">
+    <div class="ph">
+      <h2>Monitoring</h2>
+      <span class="note">Edge decay, regime win rate, signal attribution, Kelly efficiency, execution quality</span>
+    </div>
+    <div class="pb">
+      <div id="monitoringContainer"><div class="empty">Loading monitoring...</div></div>
+    </div>
+  </div>
+
   <!-- ALL NO MARKETS section is now integrated into the main dashboard -->
   <div class="panel all-no-panel">
     <div class="ph">
@@ -2678,6 +2948,39 @@ safeRun(refreshFeeds, 'refreshFeeds');
         </table>
       </div>
     </div>
+  </div>
+
+  <!-- ============ monitoring panels ============ -->
+  <div class="panel" style="margin-bottom:12px">
+    <div class="ph"><h2>Edge decay curve</h2><span class="note">edge at entry vs edge at exit per trade</span></div>
+    <div class="pb"><canvas id="edgeDecayChart"></canvas></div>
+  </div>
+
+  <div class="row half">
+    <div class="panel">
+      <div class="ph"><h2>Regime win rate</h2><span class="note">win % by regime (arbitrage, high_vol, normal, etc.)</span></div>
+      <table><thead><tr><th>Regime</th><th class="num">Trades</th><th class="num">Wins</th><th class="num">Win rate</th><th class="num">Avg edge</th></tr></thead><tbody id="regimeWinRateBody"></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="ph"><h2>Signal attribution</h2><span class="note">win % per signal source</span></div>
+      <table><thead><tr><th>Signal</th><th class="num">Trades</th><th class="num">Wins</th><th class="num">Win rate</th><th class="num">Weight</th></tr></thead><tbody id="signalAttrBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="row half">
+    <div class="panel">
+      <div class="ph"><h2>Kelly efficiency</h2><span class="note">actual_return / kelly_return per trade</span></div>
+      <table><thead><tr><th>Trade</th><th class="num">Kelly %</th><th class="num">Actual %</th><th class="num">Efficiency</th><th class="num">Edge</th></tr></thead><tbody id="kellyEffBody"></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="ph"><h2>Execution quality</h2><span class="note">(fill - bid) / (ask - bid) &mdash; should be &le; 0 for maker</span></div>
+      <table><thead><tr><th>Market</th><th>Side</th><th class="num">Bid</th><th class="num">Ask</th><th class="num">Fill</th><th class="num">Quality</th></tr></thead><tbody id="execQualityBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:12px">
+    <div class="ph"><h2>ALL NO heatmap</h2><span class="note">edge vs tau vs fair 3D surface</span></div>
+    <div class="pb"><canvas id="allNoHeatmapChart"></canvas></div>
   </div>
 
   <!-- Footer -->
