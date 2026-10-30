@@ -807,6 +807,22 @@ function loadState() {
   } catch (e) { return defaultState(); }
 }
 let state = loadState();
+// LIVE order lifecycle against the real Kalshi account (see live_orders.js).
+const LIVE_STREAM = new (require('./kalshi_stream').AccountStream)({
+  log: (kind, obj) => log(kind, obj),
+  onEvent: (ev) => LO.onStream(ev),
+});
+const LO = require('./live_engine').create({
+  stream: LIVE_STREAM,
+  getState: () => state,
+  kalshi,
+  log: (kind, obj) => log(kind, obj),
+  save: () => save(),
+  broadcast: (ev, data) => broadcast(ev, data),
+  laneState: (name) => laneState(name),
+  bookExit: (pos, qty, avg, fee, reason) => bookLiveExit(pos, qty, avg, fee, reason),
+  persistPosition: (pos) => persistPosition(pos),
+});
 let saveTimer = null;
 function save() {
   if (saveTimer) return;
@@ -993,23 +1009,9 @@ function quoteSane(q) {
 }
 
 function syntheticQuote(q, fair) {
-  // Create synthetic bid/ask around fair value when market quotes are missing
-  if (q.yes_ask != null && q.no_ask != null && q.yes_bid != null && q.no_bid != null) {
-    return q; // Already has real quotes
-  }
-  const spread = 0.02; // 2% synthetic spread
-  return {
-    ...q,
-    yes_bid: Math.max(0.02, fair - spread/2),
-    yes_ask: Math.min(0.98, fair + spread/2),
-    no_bid: Math.max(0.02, (1 - fair) - spread/2),
-    no_ask: Math.min(0.98, (1 - fair) + spread/2),
-    yes_bid_size: q.yes_bid_size || 100,
-    no_bid_size: q.no_bid_size || 100,
-    yes_ask_size: q.yes_ask_size || 100,
-    no_ask_size: q.no_ask_size || 100,
-    synthetic: true
-  };
+  // LIVE trades only real Kalshi quotes. A market missing a bid or ask is not quotable.
+  if (q.yes_ask != null && q.no_ask != null && q.yes_bid != null && q.no_bid != null) return q;
+  return null;
 }
 
 async function activeQuote(lane) {
@@ -1035,7 +1037,7 @@ async function activeQuote(lane) {
     });
     
     // Filter to markets with reasonable fair value
-    const fairMarkets = marketsWithFair.filter(m => m.fair >= 0.05 && m.fair <= 0.95);
+    const fairMarkets = marketsWithFair.filter(m => m.fair >= 0.05 && m.fair <= 0.95 && m.close_time && (new Date(m.close_time).getTime() - Date.now()) >= 60000);
     if (!fairMarkets.length) continue;
     
     // Pick closest to spot
@@ -1081,18 +1083,14 @@ async function quoteForTicker(ticker) {
 // LIVE book - REAL Kalshi account data via portfolio API
 // ---------------------------------------------------------------------------
 async function getLivePortfolio() {
-  try {
-    const portfolio = await kalshi.portfolio();
-    return portfolio;
-  } catch (e) {
-    console.error('getLivePortfolio error:', e.message);
-    return null;
-  }
+  // Real Kalshi account snapshot (balance, positions, resting orders), refreshed every 10s.
+  await LO.refreshIfStale();
+  return LO.snapshot();
 }
 
 function deployed() {
-  // Use live positions from portfolio (will be populated from API)
-  return state.live.positions.reduce((a, p) => a + (p.cost || 0), 0);
+  // Dollars at risk in the live book: filled positions plus resting entry orders.
+  return state.live.positions.reduce((a, p) => a + (p.cost || 0), 0) + LO.pendingExposure();
 }
 
 function liveRealized() {
@@ -1100,119 +1098,121 @@ function liveRealized() {
 }
 
 async function liveCash() {
-  const portfolio = await getLivePortfolio();
-  if (portfolio && portfolio.balance) {
-    const b = portfolio.balance;
-    for (const k of ['balance_available', 'balance_total', 'balance', 'buying_power']) {
-      const v = Number(b[k]);
-      if (Number.isFinite(v) && v >= 0) return v;
-    }
-  }
-  // Clock sync issue - don't fall back to DRY balance
-  if (portfolio === null) {
-    console.warn('LIVE: Kalshi API failed (likely clock sync issue) - returning null balance');
-    return null;
-  }
-  return 0;
+  await LO.refreshIfStale();
+  return LO.cash();
 }
 
 async function liveEquity() {
-  const cash = await liveCash();
-  if (cash === null) return null;
-  const portfolio = await getLivePortfolio();
-  let mtm = 0;
-  if (portfolio && portfolio.positions) {
-    for (const p of portfolio.positions) {
-      if (p.mark != null) mtm += p.qty * p.mark;
-      else mtm += p.cost || 0;
-    }
+  const v = await getLivePortfolio();
+  if (v.cash == null) return null;
+  return Number((v.cash + v.exposure).toFixed(4));
+}
+
+function todayStats(list) {
+  const day = new Date().toISOString().slice(0, 10);
+  const t = list.filter(x => String(x.exit_timestamp || '').slice(0, 10) === day);
+  const wins = t.filter(x => x.pnl > 0).length;
+  return {
+    trades: t.length,
+    pnl: Number(t.reduce((a, x) => a + (x.pnl || 0), 0).toFixed(2)),
+    win_rate: t.length ? Number((100 * wins / t.length).toFixed(1)) : 0,
+  };
+}
+
+function curveFromClosed(list) {
+  const byDay = new Map();
+  for (const t of list) {
+    const d = String(t.exit_timestamp || '').slice(0, 10);
+    if (!d) continue;
+    byDay.set(d, (byDay.get(d) || 0) + (t.pnl || 0));
   }
-  return Number((cash + mtm).toFixed(4));
+  const labels = Array.from(byDay.keys()).sort();
+  let run = 0;
+  const pnl = labels.map(d => { run += byDay.get(d); return Number(run.toFixed(2)); });
+  return { labels, pnl };
 }
 
 async function liveAccountPayload() {
-  const portfolio = await getLivePortfolio();
-  const cash = await liveCash();
-  const equity = await liveEquity();
+  const v = await getLivePortfolio();
+  const cash = v.cash;
+  const equity = cash == null ? null : Number((cash + v.exposure).toFixed(4));
+  if (cash != null && !state.live.starting_balance) state.live.starting_balance = cash;
+  const base = state.live.starting_balance || cash || 0;
   const closed = state.live.closed || [];
   const wins = closed.filter(t => t.pnl > 0).length;
-  
-  let realized = 0;
-  if (portfolio && portfolio.positions) {
-    for (const p of portfolio.positions) {
-      if (p.realized_pnl_dollars != null) realized += Number(p.realized_pnl_dollars);
-    }
-  }
-  
   return {
     book: 'live',
     label: 'LIVE account - real Kalshi',
-    starting_balance: state.live.starting_balance || (cash || 0),
-    baseline: state.live.baseline || (cash || 0),
-    cash: cash,
-    equity: equity,
-    realized: realized,
-    total_pnl: equity !== null ? Number((equity - (state.live.starting_balance || cash || 0)).toFixed(2)) : null,
-    exposure: Number(deployed().toFixed(2)),
-    open_positions: portfolio && portfolio.positions ? portfolio.positions.length : 0,
-    closed_trades: state.live.closed.length,
-    wins, losses: state.live.closed.length - wins,
-    win_rate: state.live.closed.length ? Number((100 * wins / state.live.closed.length).toFixed(1)) : 0,
-    today: todayStats(state.live.closed),
-    curve: curveFromClosed(state.live.closed),
-    clock_sync_issue: cash === null,
+    starting_balance: base,
+    baseline: base,
+    cash,
+    equity,
+    realized: Number(v.realized.toFixed(2)),
+    total_pnl: equity == null ? null : Number((equity - base).toFixed(2)),
+    exposure: Number(v.exposure.toFixed(2)),
+    open_positions: v.positions.length,
+    held_contracts: v.positions.reduce((a, p) => a + p.quantity, 0),
+    resting_orders: v.resting_count,
+    portfolio_value: v.portfolio_value,
+    as_of: v.as_of ? new Date(v.as_of).toISOString() : null,
+    event_positions: v.event_positions,
+    event_cost: Number(v.event_cost.toFixed(2)),
+    event_exposure: Number(v.event_exposure.toFixed(2)),
+    breakdown: v.breakdown,
+    snapshot_error: v.error,
+    closed_trades: closed.length,
+    wins,
+    losses: closed.length - wins,
+    win_rate: closed.length ? Number((100 * wins / closed.length).toFixed(1)) : 0,
+    today: todayStats(closed),
+    curve: curveFromClosed(closed),
+    clock_sync_issue: false,
   };
 }
 
 async function openLivePosition(lane, q, side, price, fair, edge, sigma) {
-  const qty = Math.max(1, Math.floor(state.runtime.clip / price));
-  const cost = Number((qty * price).toFixed(4));
-  const cash = await liveCash();
-  if (cash < cost) { const ls = laneState(lane.name); ls.skips++; ls.last_skip = 'insufficient live cash'; return null; }
-  const stop = Number((price * (1 - state.runtime.stop_loss)).toFixed(3));
-  const tp = Number(Math.min(0.99, price + (price * 2 * state.runtime.stop_loss)).toFixed(3));
-  // Capture bid/ask at entry for fill quality tracking
-  const bid_at_entry = side === 'YES' ? q.yes_bid : q.no_bid;
-  const ask_at_entry = side === 'YES' ? q.yes_ask : q.no_ask;
-  const pos = {
-    id: 'live-' + crypto.randomBytes(3).toString('hex'),
-    market_id: q.ticker,
-    title: q.title,
-    series: q.series,
-    strategy: lane.name,
-    side,
-    entry_price: price,
-    qty, cost,
-    fair_at_entry: Number(fair.toFixed(4)),
-    edge_at_entry: Number(edge.toFixed(4)),
-    sigma_per_sec: sigma,
-    strike: q.strike,
-    horizon: lane.horizon,
-    stop_loss: stop,
-    take_profit: tp,
-    mark: price,
-    opened: new Date().toISOString(),
-    close_time: q.close_time,
-    source: q.source || 'live',
-    host: q.host || kalshi.LIVE_BASE,
-    // Fill quality tracking
-    bid_at_entry,
-    ask_at_entry,
-  };
-  state.live.positions.push(pos);
-  const ls = laneState(lane.name);
-  ls.entries++;
-  ls.heartbeat = new Date().toISOString();
-  ls.last_series = q.series;
-  log('live_open', { strategy: lane.name, market: pos.market_id, side, entry: price, qty, cost, fair: pos.fair_at_entry, edge: pos.edge_at_entry, source: pos.source, bid_at_entry, ask_at_entry });
-  broadcast('strategy', lane.name + ' entry ' + side + ' ' + pos.market_id + ' @ ' + price);
-  // Persist to SQLite
-  persistPosition(pos);
-  save();
-  return pos;
+  return LO.openEntry(lane, q, side, price, fair, edge, sigma);
 }
 
-function closeDryPosition(pos, exitPrice, reason, result) {
+// Books a real exit fill (from an immediate-or-cancel sell) against a live position.
+function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
+  const idx = state.live.positions.indexOf(pos);
+  if (idx === -1 || !(pos.qty > 0)) return;
+  const qtyX = Math.min(qty, pos.qty);
+  const share = qtyX / pos.qty;
+  const costPart = Number((pos.cost * share).toFixed(4));
+  const entryFees = Number(((pos.fees || 0) * share).toFixed(4));
+  const exitFees = Number(((feePerContract || 0) * qtyX).toFixed(4));
+  const proceeds = Number((qtyX * exitPrice).toFixed(4));
+  const pnl = Number((proceeds - costPart - entryFees - exitFees).toFixed(4));
+  const trade = {
+    market_id: pos.market_id, title: pos.title, side: pos.side, strategy: pos.strategy,
+    entry_price: pos.entry_price, exit_price: exitPrice, quantity: qtyX,
+    cost_basis: costPart, proceeds, fees: Number((entryFees + exitFees).toFixed(4)), pnl,
+    exit_reason: reason, result: '', source: 'live',
+    hold_seconds: Math.round((Date.now() - new Date(pos.opened).getTime()) / 1000),
+    exit_timestamp: new Date().toISOString(), opened: pos.opened, order_id: pos.order_id || null,
+  };
+  state.live.closed.push(trade);
+  pos.qty = Number((pos.qty - qtyX).toFixed(2));
+  pos.cost = Number((pos.cost - costPart).toFixed(4));
+  pos.fees = Number(((pos.fees || 0) - entryFees).toFixed(4));
+  if (pos.qty <= 0) {
+    state.live.positions.splice(idx, 1);
+    Promise.resolve(removePosition(pos.id)).catch(() => {});
+  }
+  const ls = laneState(pos.strategy);
+  ls.trades++;
+  if (pnl > 0) ls.wins++; else ls.losses++;
+  ls.realized = Number((ls.realized + pnl).toFixed(2));
+  ls.heartbeat = new Date().toISOString();
+  log('live_exit', { strategy: pos.strategy, market: pos.market_id, side: pos.side, qty: qtyX, entry: pos.entry_price, exit: exitPrice, reason, pnl, fees: trade.fees });
+  broadcast('strategy', pos.strategy + ' exit ' + pos.market_id + ' @ ' + exitPrice + ' pnl ' + pnl);
+  Promise.resolve(persistTrade(trade)).catch(() => {});
+  save();
+}
+
+function closeLivePosition(pos, exitPrice, reason, result) {
   const idx = state.live.positions.indexOf(pos);
   if (idx === -1) return;
   state.live.positions.splice(idx, 1);
@@ -1261,7 +1261,7 @@ function closeDryPosition(pos, exitPrice, reason, result) {
   if (pnl > 0) ls.wins++; else ls.losses++;
   ls.realized = Number((ls.realized + pnl).toFixed(2));
   ls.heartbeat = new Date().toISOString();
-  log('dry_close', { strategy: pos.strategy, market: pos.market_id, side: pos.side, entry: pos.entry_price, exit: exitPrice, reason, pnl, result: result || '', fill_quality: fillQuality });
+  log('live_close', { strategy: pos.strategy, market: pos.market_id, side: pos.side, entry: pos.entry_price, exit: exitPrice, reason, pnl, result: result || '', fill_quality: fillQuality });
   broadcast('strategy', pos.strategy + ' exit ' + pos.market_id + ' @ ' + exitPrice + ' pnl ' + pnl);
   fireWebhooks('trade_exit', { market_id: pos.market_id, side: pos.side, strategy: pos.strategy, entry_price: pos.entry_price, exit_price: exitPrice, pnl, reason, timestamp: new Date().toISOString() });
   // Persist to SQLite
@@ -1277,66 +1277,48 @@ function closeDryPosition(pos, exitPrice, reason, result) {
 // ---------------------------------------------------------------------------
 
 
-async function markDryPositions() {
+async function markLivePositions() {
   const tickers = Array.from(new Set(state.live.positions.map(p => p.market_id)));
   for (const ticker of tickers) {
     const q = await quoteForTicker(ticker);
-    const held = state.live.positions.filter(p => p.market_id === ticker);
     if (!q) continue;
+    const held = state.live.positions.filter(p => p.market_id === ticker);
     for (const pos of held) {
+      if (!(pos.qty > 0)) continue;
+      // Settlement: Kalshi settles the contract itself. Book it from the market result.
       if (q.result === 'yes' || q.result === 'no') {
-        const settled = Number(q.result === pos.side.toLowerCase() ? 1 : 0);
-        // Record settlement data: Coinbase spot at settlement as CF BRTI proxy
-        const spotAtSettlement = pos.spot ? spot[pos.spot] : null;
-        const settlementRecord = {
-          market_id: pos.market_id,
-          side: pos.side,
-          strategy: pos.strategy,
-          settled_price: settled,
-          kalshi_result: q.result,
-          coinbase_spot_at_settlement: spotAtSettlement ? spotAtSettlement.price : null,
-          coinbase_spot_time: spotAtSettlement ? spotAtSettlement.t : null,
-          spot_product: pos.spot,
-          entry_price: pos.entry_price,
-          pnl: settled * pos.qty - pos.cost,
-          timestamp: new Date().toISOString(),
-        };
-        state.settlement_db.push(settlementRecord);
-        if (state.settlement_db.length > 10000) state.settlement_db.shift();
-        
-        closeDryPosition(pos, settled, 'settled', q.result);
+        const settled = q.result === String(pos.side).toLowerCase() ? 1 : 0;
+        closeLivePosition(pos, settled, 'settled', q.result);
         continue;
       }
       if (q.status === 'finalized' || q.status === 'settled') {
-        closeDryPosition(pos, 0, 'settled_no_result', q.status);
+        closeLivePosition(pos, 0, 'settled_no_result', q.status);
         continue;
       }
       const bid = pos.side === 'YES' ? q.yes_bid : q.no_bid;
-            if (bid != null) pos.mark = bid;
-            pos.quote = { bid, ask: pos.side === 'YES' ? q.yes_ask : q.no_ask, close_time: q.close_time, status: q.status, updated: q.updated };
-            const heldMs = Date.now() - new Date(pos.opened).getTime();
-            if (heldMs < Number(state.runtime.min_hold_sec || 45) * 1000) continue;
-
-            // Time-decay exit: force exit at 80% of contract lifetime
-            const totalLifeMs = new Date(q.close_time).getTime() - new Date(pos.opened).getTime();
-            const lifePct = heldMs / totalLifeMs;
-            if (lifePct > 0.8) { closeDryPosition(pos, bid, 'time_decay', ''); continue; }
-
-            // Trailing stop: 50% profit lock once mark >= entry + 0.5*edge
-            if (bid != null && pos.edge_at_entry > 0 && bid >= pos.entry_price + 0.5 * pos.edge_at_entry) {
-              const trailStop = pos.entry_price + (bid - pos.entry_price) * 0.5;
-              if (bid <= trailStop) { closeDryPosition(pos, bid, 'trail_stop', ''); continue; }
-            }
-
-            if (bid != null && bid >= pos.take_profit) closeDryPosition(pos, bid, 'take_profit', '');
-            else if (bid != null && bid <= pos.stop_loss) closeDryPosition(pos, bid, 'stop_loss', '');
+      if (bid != null) pos.mark = bid;
+      pos.quote = { bid, ask: pos.side === 'YES' ? q.yes_ask : q.no_ask, close_time: q.close_time, status: q.status, updated: q.updated };
+      if (pos.exit_inflight) continue;
+      const heldMs = Date.now() - new Date(pos.opened).getTime();
+      if (heldMs < Number(state.runtime.min_hold_sec || 45) * 1000) continue;
+      // Time-decay exit: force an exit at 80% of the contract lifetime.
+      const totalLifeMs = new Date(q.close_time).getTime() - new Date(pos.opened).getTime();
+      const lifePct = totalLifeMs > 0 ? heldMs / totalLifeMs : 1;
+      if (lifePct > 0.8) { await LO.exitPosition(pos, bid, 'time_decay'); continue; }
+      // Trailing stop: lock half of the move once the bid is at or above entry + 0.5 * edge.
+      if (bid != null && pos.edge_at_entry > 0 && bid >= pos.entry_price + 0.5 * pos.edge_at_entry) {
+        const trailStop = pos.entry_price + (bid - pos.entry_price) * 0.5;
+        if (bid <= trailStop) { await LO.exitPosition(pos, bid, 'trail_stop'); continue; }
+      }
+      if (bid != null && bid >= pos.take_profit) await LO.exitPosition(pos, bid, 'take_profit');
+      else if (bid != null && bid <= pos.stop_loss) await LO.exitPosition(pos, bid, 'stop_loss');
     }
   }
 }
 
-
 async function engineTick() {
-  await markDryPositions();
+  await LO.reconcile();
+  await markLivePositions();
   const list = LANES.filter(l => true);
   for (const lane of list) {
     const ls = laneState(lane.name);
@@ -1438,25 +1420,10 @@ async function engineTick() {
 // DRY account (real, read-only)
 // ---------------------------------------------------------------------------
 // LIVE account (real, read-only)
-async function livePositions() {
-  const portfolio = await getLivePortfolio();
-  if (!portfolio || !portfolio.positions) return [];
-  return portfolio.positions.map(p => ({
-    market_id: p.ticker,
-    side: Number(p.position_fp) > 0 ? 'YES' : 'NO',
-    entry_price: p.market_exposure_dollars != null && p.position_fp != null
-      ? Number((Math.abs(p.market_exposure_dollars) / Math.abs(p.position_fp)).toFixed(3))
-      : null,
-    quantity: Math.abs(Number(p.position_fp || 0)),
-    strategy: strategyForTicker(p.ticker),
-    stop_loss: null,
-    take_profit: null,
-    realized: p.realized_pnl_dollars != null ? Number(p.realized_pnl_dollars) : null,
-    fees: p.fees_paid_dollars != null ? Number(p.fees_paid_dollars) : null,
-    exposure: p.market_exposure_dollars != null ? Number(p.market_exposure_dollars) : null,
-    kind: 'market',
-  }));
+function livePositions() {
+  return LO.snapshot().positions;
 }
+
 function strategyForTicker(ticker) {
   const series = String(ticker || '').split('-')[0];
   const hit = LANES.find(l => (l.seriesList || []).includes(series) || l.series === series);
@@ -1572,6 +1539,7 @@ async function modePayload(book) {
   };
 }
 function kalshiBlock(book) {
+  if ((book || state.mode) === 'live') return LO.kalshiView();
   const b = book || state.mode || 'dry';
   // LIVE mode: use real Kalshi positions from portfolio API
   const markets = state.live.positions.map(p => ({
@@ -1614,7 +1582,7 @@ function snapshotPayload(book, preloaded) {
         clock_sync_issue: live?.clock_sync_issue,
       },
       balance: live?.cash ?? null,
-      kalshi_age_sec: null ? Math.round((Date.now() - null) / 1000) : null,
+      kalshi_age_sec: LO.kalshiView().age_sec,
       accounts: { live },
       current: b,
       equity: live.curve,
@@ -1632,15 +1600,6 @@ function snapshotPayload(book, preloaded) {
       generated_at: new Date().toISOString(),
     };
 }
-function livePositions() {
-  // Return placeholder positions - browser will fetch real data via /api/positions
-  return [
-    { market_id: 'KXBTC15M-26OCT291945-45', strategy: 'live', side: 'NO',
-      entry_price: 0.74, quantity: 6, stop_loss: 0.555, take_profit: 0.99,
-      opened: '2026-10-29T23:37:25.451Z', fair: 0.7483, edge: 0.0083, cost: 4.44 }
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // Provenance
 // ---------------------------------------------------------------------------
@@ -2530,28 +2489,12 @@ async function handle(req, res) {
   // --- accounts
     // --- accounts
   if (p === '/api/accounts') {
-    const book = state.mode || 'live';
-    if (book === 'live') {
-      (async () => {
-        try {
-          const live = await liveAccountPayload();
-          return json(res, {
-            accounts: { live },
-            current: 'live',
-            provenance: lastProvenance()
-          });
-        } catch (e) {
-          console.error('/api/accounts error:', e.message);
-          const live = await liveAccountPayload();
-          return json(res, {
-            accounts: { live },
-            current: 'live',
-            provenance: lastProvenance()
-          });
-        }
-      })();
-    } else {
-      return json(res, { accounts: { live: {} }, current: 'live', provenance: lastProvenance() });
+    try {
+      const live = await liveAccountPayload();
+      return json(res, { accounts: { live }, current: 'live', provenance: lastProvenance() });
+    } catch (e) {
+      console.error('/api/accounts error:', e && e.message ? e.message : e);
+      return json(res, { accounts: { live: { error: String(e && e.message ? e.message : e) } }, current: 'live', provenance: lastProvenance() }, 500);
     }
   }
   if (p === '/api/llm/usage') {
@@ -2696,6 +2639,7 @@ function analysisPayload(strategy) {
 
 
 async function runAllNoEngine() {
+  if (state.mode === 'live') return; // ALL NO is not wired to real orders in LIVE yet
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
   if (!noLs || !noLs.running) return;
@@ -2732,6 +2676,7 @@ async function runAllNoEngine() {
 }
 
 async function runAllNoExits() {
+  if (state.mode === 'live') return; // ALL NO is not wired to real orders in LIVE yet
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
   if (!noLs || !noLs.running) return;
@@ -2874,12 +2819,16 @@ async function boot() {
   // so nothing can ever override the operator's button pushes — imperial law.
   try { exterminateSupervisors(); } catch (e) { }
   setInterval(() => { try { exterminateSupervisors(); } catch (e) { } }, 3000);
+  LO.start();
+  LIVE_STREAM.start();
+  // Account state is streamed (LIVE_STREAM); the balance re-reads on fills, not on a timer.
 
   // Keep every lane's series quoted even when no lane is running, so the
   // provenance block on the page always names a dry host and a fresh quote.
   setInterval(async () => {
     for (const lane of LANES) {
       if (!lane.seriesList || !lane.seriesList.length) continue;
+      if (!laneState(lane.name).running) continue; // read budget: quote only running lanes
       for (const s of lane.seriesList) await marketsForSeries(s, 5);
     }
   }, 5000);
@@ -2894,15 +2843,7 @@ async function boot() {
 
   // Kalshi WebSocket for real-time market data (replaces 2s polling)
   const seriesList = LANES.flatMap(l => l.seriesList || []).filter(Boolean);
-  const kalshiWS = new KalshiWS(kalshi.accounts,
-    (market) => { marketCache.set('ws:' + market.series_ticker, { at: Date.now(), market, source: 'ws' }); },
-    (fill) => { /* handle fill update */ },
-    (order) => { /* handle order update */ }
-  );
-  kalshiWS.connect();
-  kalshiWS.subscribeMarkets(seriesList);
-  kalshiWS.subscribeFills();
-  kalshiWS.subscribeOrders();
+  // Account data: kalshi_stream.js (WebSocket). Quotes: read per engine tick.
 
   // Main engine tick - evaluates all lanes every 2 seconds
   setInterval(async () => {
@@ -2921,7 +2862,19 @@ async function boot() {
   });
 }
 
-const server = http.createServer(handle);
+const server = http.createServer((req, res) => {
+  Promise.resolve(handle(req, res)).catch((e) => {
+    console.error('[http] handler error:', e && e.message ? e.message : e);
+    try {
+      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(e && e.message ? e.message : e) }));
+    } catch (_) { }
+  });
+});
+// Background loops (engine, snapshots, WebSockets) must not take the trading server down.
+process.on('unhandledRejection', (e) => {
+  console.error('[unhandledRejection]', e && e.message ? e.message : e);
+});
 
 if (require.main === module) {
   boot().catch(e => {
@@ -2929,4 +2882,4 @@ if (require.main === module) {
     process.exit(1);
   });
 }
-module.exports = { handle, snapshotPayload, liveAccountPayload, cards, state, engineTick, pollSpot, noBook, openLivePosition, closeDryPosition, markDryPositions };
+module.exports = { handle, snapshotPayload, liveAccountPayload, cards, state, engineTick, pollSpot, noBook, openLivePosition, closeLivePosition, markLivePositions };

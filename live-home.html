@@ -426,7 +426,7 @@ button.loading.yellow::after {
          LIVE-only server. -->
     <div class="modeswitch">
       <a id="modeLive" class="modebtn live on" href="/live">LIVE</a>
-      <a id="allNoBtn" class="modebtn allno" href="/all-no-markets" title="ALL NO MARKETS - NO-side only, maker entries, $250 of its own simulated money">ALL NO</a>
+      <a id="allNoBtn" class="modebtn allno" href="/all-no-markets" title="ALL NO MARKETS - NO-side only. Not wired to real Kalshi orders in LIVE yet">ALL NO</a>
     </div>
   </div>
   <div class="stamp">Rendered 2026-10-19 11:57:21</div>
@@ -755,7 +755,7 @@ button.loading.yellow::after {
     </div>
     <p style="color:var(--faint);font-size:11.5px;margin-top:10px">
       Curves are rebuilt from <code>trade_logs</code>, so a strategy keeps its history across restarts and deploys.
-      Cards show the <b>DRY</b> book only.
+      Cards show the <b>LIVE</b> book only.
     </p>
   </div>
 </div>
@@ -768,7 +768,7 @@ button.loading.yellow::after {
      and the panel is tall. -->
 <div class="panel" id="feedsPanel" style="margin-bottom:12px">
     <div class="ph" style="cursor:pointer" onclick="toggleFeeds()">
-      <h2>DRY feeds &amp;amp; account â€” simulated</h2>
+      <h2>LIVE feeds &amp;amp; account â€” simulated</h2>
       <span class="note">
         <span id="feedToggle" style="cursor:pointer;font-weight:600">hide</span>
         &middot; synced 2026-10-19 11:56:37
@@ -809,7 +809,7 @@ button.loading.yellow::after {
       <div class="card" style="cursor:default" id="accountCard">
         <div class="ctop">
           <div><div class="clabel" id="acctLabel">LIVE account — real Kalshi</div><div class="mono cname">live book</div></div>
-          <span class="pill ok" id="acctPill">DRY</span>
+          <span class="pill ok" id="acctPill">LIVE</span>
         </div>
         <div class="cchart" style="height:130px"><canvas id="accountChart"></canvas></div>
         <div class="cstats">

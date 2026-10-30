@@ -8,10 +8,6 @@ const path = require('path');
 const crypto = require('crypto');
 
 const HERE = __dirname;
-// Use api.kalshi.com for LIVE (main Kalshi platform), elections.kalshi.com for elections-only
-const LIVE_BASE = process.env.KALSHI_LIVE_BASE || 'https://api.kalshi.com/trade-api/v2';
-const DEMO_BASE = 'https://demo-api.kalshi.co/trade-api/v2';
-
 function loadEnv(file) {
   const out = {};
   const p = file || path.join(HERE, '.env');
@@ -46,6 +42,10 @@ function loadEnv(file) {
 }
 
 const ENV = loadEnv();
+// LIVE_BASE is read AFTER .env is loaded. It used to be read before, so it always
+// fell back to api.kalshi.com, which does not resolve on this machine.
+const LIVE_BASE = ENV.KALSHI_LIVE_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
+const DEMO_BASE = 'https://demo-api.kalshi.co/trade-api/v2';
 
 const accounts = {
   // DRY mode: uses live API credentials but paper trading (simulated fills)
@@ -95,62 +95,23 @@ function buildUrl(acct, route, query) {
   return { url: acct.base + route + qs, fullPath };
 }
 
-// Signature strategies, in the order they are tried. Kalshi's documented rule
-// ("sign the path with the query string") is only true for some endpoints:
-// /portfolio/positions and /portfolio/fills reject a signature that includes
-// the query string (401 INCORRECT_API_KEY_SIGNATURE) while /markets accepts it.
-// So each request tries the variants and keeps the one that worked.
-// CRITICAL: Cache strategy PER ROUTE because different endpoints need different signing
-const ALL_STRATEGIES = [
-  { scheme: 'pss', withQuery: true },    // markets needs query string
-  { scheme: 'pss', withQuery: false },   // portfolio needs NO query string
-  { scheme: 'pkcs1', withQuery: true },
-  { scheme: 'pkcs1', withQuery: false },
-];
-// For portfolio endpoints with shard params, we NEED query string in signature
-const PORTFOLIO_STRATEGIES = [
-  { scheme: 'pss', withQuery: true },   // portfolio WITH query string (for shard params)
-  { scheme: 'pss', withQuery: false },
-  { scheme: 'pkcs1', withQuery: true },
-  { scheme: 'pkcs1', withQuery: false },
-];
-const strategyCache = {}; // key: "acctName:route"
-
+// Request signing: RSA-PSS (SHA-256) over timestamp + METHOD + path, where the path
+// EXCLUDES the query string. Verified live: GET /portfolio/balance returns 200 with the
+// query stripped from the signed path, and 401 INCORRECT_API_KEY_SIGNATURE when it was included.
 async function raw(acctName, method, route, opts) {
   opts = opts || {};
   const acct = accounts[acctName];
   if (!acct || !acct.keyId || !acct.pem) throw new Error('no credentials for ' + acctName);
-  
-  // Build query params with shard support for live account
   const query = Object.assign({}, opts.query || {});
-  if (acctName === 'live' && acct.shards) {
-    // For portfolio endpoints, add exchange_index and subaccount if not already provided
-    const portfolioRoutes = ['/portfolio/balance', '/portfolio/positions', '/portfolio/fills', '/portfolio/orders'];
-    if (portfolioRoutes.some(r => route.startsWith(r))) {
-      if (query.exchange_index == null) query.exchange_index = acct.shards.crypto || 0;
-      if (query.subaccount == null) query.subaccount = acct.subaccount || 0;
-    }
-  }
-  
-  const { url, fullPath } = buildUrl(acct, route, query);
+  const qs = Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : '';
+  const url = acct.base + route + qs;
   const pathNoQuery = '/trade-api/v2' + route;
-  
-  // Strategy cache keyed by account + route (different endpoints need different signing)
-  const cacheKey = acctName + ':' + route;
-  
-  // Use portfolio-specific strategy order for portfolio endpoints
-  const portfolioRoutes = ['/portfolio/balance', '/portfolio/positions', '/portfolio/fills', '/portfolio/orders'];
-  const isPortfolioRoute = portfolioRoutes.some(r => route.startsWith(r));
-  const strategiesToTry = strategyCache[cacheKey]
-    ? [strategyCache[cacheKey]].concat((isPortfolioRoute ? PORTFOLIO_STRATEGIES : ALL_STRATEGIES).filter(s => s !== strategyCache[cacheKey]))
-    : (isPortfolioRoute ? PORTFOLIO_STRATEGIES : ALL_STRATEGIES);
-  
   let lastErr = null;
-  for (const st of strategiesToTry) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const ts = Math.floor(Date.now() / 1000).toString();
     const headers = {
       'KALSHI-ACCESS-KEY': acct.keyId,
-      'KALSHI-ACCESS-SIGNATURE': sign(acct, method, st.withQuery ? fullPath : pathNoQuery, ts, st.scheme),
+      'KALSHI-ACCESS-SIGNATURE': sign(acct, method, pathNoQuery, ts, 'pss'),
       'KALSHI-ACCESS-TIMESTAMP': ts,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -161,28 +122,56 @@ async function raw(acctName, method, route, opts) {
     try {
       r = await fetch(url, init);
     } catch (e) {
-      lastErr = new Error('network: ' + e.message);
-      break;
+      throw new Error('network: ' + e.message);
     }
     const text = await r.text();
     let parsed = null;
     try { parsed = text ? JSON.parse(text) : null; } catch (e) { parsed = { raw: text }; }
-    if (r.ok) {
-      strategyCache[cacheKey] = st;
-      return parsed;
-    }
-    lastErr = new Error('HTTP ' + r.status + ' ' + method + ' ' + fullPath + ' :: ' + text.slice(0, 300));
+    if (r.ok) return parsed;
+    lastErr = new Error('HTTP ' + r.status + ' ' + method + ' ' + pathNoQuery + qs + ' :: ' + text.slice(0, 300));
     lastErr.status = r.status;
-    // Rate limit - retry after delay
-    if (r.status === 429) {
-      const retryAfter = parseInt(r.headers.get('retry-after') || '2') * 1000;
+    if (r.status === 429 && !opts.noRetry429) {
+      const retryAfter = Math.min(5000, (parseInt(r.headers.get('retry-after') || '2', 10) || 2) * 1000);
       await new Promise(resolve => setTimeout(resolve, retryAfter));
       continue;
     }
-    if (r.status === 401) continue;
     break;
   }
   throw lastErr;
+}
+
+// ---------------------------------------------------------------------------
+// LIVE order endpoints (Kalshi V2 event-order API). Signed like every other call.
+//   place:  POST   /portfolio/events/orders
+//   cancel: DELETE /portfolio/events/orders/{order_id}?market_ticker=...
+//   read:   GET    /portfolio/orders/{order_id}
+// ---------------------------------------------------------------------------
+async function placeOrderV2(body) {
+  return raw('live', 'POST', '/portfolio/events/orders', { body });
+}
+async function cancelOrderV2(orderId, marketTicker) {
+  const query = marketTicker ? { market_ticker: marketTicker } : {};
+  return raw('live', 'DELETE', '/portfolio/events/orders/' + encodeURIComponent(orderId), { query });
+}
+async function getOrder(orderId, exchangeIndex) {
+  const query = Number.isInteger(exchangeIndex) ? { exchange_index: exchangeIndex } : {};
+  return raw('live', 'GET', '/portfolio/orders/' + encodeURIComponent(orderId), { query });
+}
+
+// Moves funds between exchange shards on the primary account (Kalshi intra-account transfer).
+// Kalshi collateral is per shard: an order is checked against the shard its market lives on.
+// amount is in centicents: 1 dollar = 10,000 centicents. Transfers settle asynchronously.
+async function transferBetweenShards(dollars, sourceShard, destShard) {
+  return raw("live", "POST", "/portfolio/intra_exchange_instance_transfer", { body: {
+    amount: Math.round(dollars * 10000),
+    client_transfer_id: crypto.randomUUID(),
+    source: "event_contract",
+    destination: "event_contract",
+    source_exchange_shard: sourceShard,
+    destination_exchange_shard: destShard,
+    source_subaccount: 0,
+    destination_subaccount: 0,
+  } });
 }
 
 const cache = new Map();
@@ -234,7 +223,7 @@ function clearCache() {
 // Warm cache for critical endpoints
 async function warmCache() {
   const criticalEndpoints = [
-    { route: '/portfolio/balance', opts: { query: {} } },
+    // balance is owned by the engine (one call per second on the basic tier)
     { route: '/markets', opts: { query: { limit: 5, status: 'open', series_ticker: 'KXBTC15M' } } },
     { route: '/markets', opts: { query: { limit: 5, status: 'open', series_ticker: 'KXETH15M' } } },
   ];
@@ -303,64 +292,9 @@ async function post(route, body) {
 }
 
 // Convenience methods for common queries
-async function portfolio() {
-  // Fetch from all shards and aggregate using live account (which has shard config)
-  const shards = ['crypto', 'politics', 'sports', 'finance'];
-  let totalBalance = 0;
-  let allPositions = [];
-  let allFills = [];
-  let lastSource = 'demo';
-  let lastHost = DEMO_BASE;
-  
-  for (const shardName of shards) {
-    try {
-      const exchangeIndex = accounts.live.shards[shardName] || 0;
-      const subaccount = accounts.live.subaccount || 0;
-      
-      // Use raw('live', ...) to get shard-specific data
-      const bal = await raw('live', 'GET', '/portfolio/balance', { 
-        query: { exchange_index: exchangeIndex, subaccount: subaccount }, 
-        ttlMs: 4000 
-      });
-      const pos = await raw('live', 'GET', '/portfolio/positions', { 
-        query: { limit: 200, exchange_index: exchangeIndex, subaccount: subaccount }, 
-        ttlMs: 8000 
-      });
-      
-      if (bal && bal.balance_available != null) {
-        totalBalance += Number(bal.balance_available);
-      }
-      if (pos) {
-        allPositions = allPositions.concat(pos);
-      }
-      
-      lastSource = 'live';
-      lastHost = LIVE_BASE;
-    } catch (e) {
-      console.error(`Portfolio fetch failed for shard ${shardName}:`, e.message);
-    }
-  }
-  
-  // Also fetch fills from primary shard (crypto)
-  let fills = null;
-  try { 
-    fills = await raw('live', 'GET', '/portfolio/fills', { 
-      query: { limit: 200, exchange_index: accounts.live.shards.crypto || 0, subaccount: accounts.live.subaccount || 0 }, 
-      ttlMs: 15000 
-    }); 
-  } catch (e) { }
-  
-  return {
-    balance: { balance_available: totalBalance, balance_total: totalBalance },
-    positions: allPositions,
-    fills: fills || null,
-    source: lastSource,
-    host: lastHost,
-  };
-}
 
 async function markets(series, limit) {
   return get('/markets', { query: { limit: limit || 5, status: 'open', series_ticker: series }, ttlMs: 1500 });
 }
 
-module.exports = { loadEnv, ENV, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, portfolio, markets, getCacheStats, clearCache, warmCache };
+module.exports = { loadEnv, ENV, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards };
