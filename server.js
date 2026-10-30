@@ -1095,11 +1095,17 @@ async function liveCash() {
       if (Number.isFinite(v) && v >= 0) return v;
     }
   }
-  return state.live.balance || 0;
+  // Clock sync issue - don't fall back to DRY balance
+  if (portfolio === null) {
+    console.warn('LIVE: Kalshi API failed (likely clock sync issue) - returning null balance');
+    return null;
+  }
+  return 0;
 }
 
 async function liveEquity() {
   const cash = await liveCash();
+  if (cash === null) return null;
   const portfolio = await getLivePortfolio();
   let mtm = 0;
   if (portfolio && portfolio.positions) {
@@ -1128,12 +1134,12 @@ async function liveAccountPayload() {
   return {
     book: 'live',
     label: 'LIVE account - real Kalshi',
-    starting_balance: state.live.starting_balance || cash,
-    baseline: state.live.baseline || cash,
+    starting_balance: state.live.starting_balance || (cash || 0),
+    baseline: state.live.baseline || (cash || 0),
     cash: cash,
     equity: equity,
     realized: realized,
-    total_pnl: Number((equity - (state.live.starting_balance || cash)).toFixed(2)),
+    total_pnl: equity !== null ? Number((equity - (state.live.starting_balance || cash || 0)).toFixed(2)) : null,
     exposure: Number(deployed().toFixed(2)),
     open_positions: portfolio && portfolio.positions ? portfolio.positions.length : 0,
     closed_trades: state.live.closed.length,
@@ -1141,6 +1147,7 @@ async function liveAccountPayload() {
     win_rate: state.live.closed.length ? Number((100 * wins / state.live.closed.length).toFixed(1)) : 0,
     today: todayStats(state.live.closed),
     curve: curveFromClosed(state.live.closed),
+    clock_sync_issue: cash === null,
   };
 }
 
@@ -1604,18 +1611,19 @@ function rememberTitles(lanes) {
 
 function snapshotPayload(book, preloaded) {
   const b = book || 'live';
-  const live = preloaded?.live || { book: 'live', cash: 0, equity: 0, curve: { labels: [], pnl: [] } };
+  const live = preloaded?.live || { book: 'live', cash: 0, equity: 0, curve: { labels: [], pnl: [] }, clock_sync_issue: false };
   const prov = lastProvenance();
   return {
       book: b,
       mode: {
         mode: b,
         dry: null,
-        funding: { balance: live ? live.cash : null },
+        funding: { balance: live?.cash ?? null },
         no_lanes_enabled: !!state.no_lanes_enabled,
         live_full: live,
+        clock_sync_issue: live?.clock_sync_issue,
       },
-      balance: live.cash,
+      balance: live?.cash ?? null,
       kalshi_age_sec: null ? Math.round((Date.now() - null) / 1000) : null,
       accounts: { live },
       current: b,
