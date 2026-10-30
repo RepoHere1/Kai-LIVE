@@ -923,6 +923,7 @@ function quoteFromMarket(m) {
     series: String(m.ticker || '').split('-')[0],
     strike: m.floor_strike != null ? Number(m.floor_strike) : (m.cap_strike != null ? Number(m.cap_strike) : null),
     strike_type: m.strike_type,
+    exchange_index: m.exchange_index != null ? Number(m.exchange_index) : 0,
     yes_bid: num(m.yes_bid_dollars),
     yes_ask: num(m.yes_ask_dollars),
     no_bid: num(m.no_bid_dollars),
@@ -1730,11 +1731,12 @@ async function noBook() {
       if (q.status === 'finalized' || q.result) continue;
       if (!q.strike || !q.close_time) continue;
       
-      const sp = spot.BTC ? spot.BTC : spot.ETH ? spot.ETH : null; // fallback spot
+      const asset = s.startsWith('KXB') ? 'BTC-USD' : s.startsWith('KXE') ? 'ETH-USD' : s.startsWith('KXX') ? 'XRP-USD' : s.startsWith('KXH') ? 'HYPE-USD' : null;
+      const sp = asset ? spot[asset] : null;
       if (!sp || !Number.isFinite(sp.price)) continue;
       
       // Compute fair value using Black-Scholes normal CDF
-      const perSec = perSecondVol('BTC', 900); // use BTC vol as proxy
+      const perSec = perSecondVol(asset, 900);
       const tau = Math.max(0, (new Date(q.close_time).getTime() - Date.now()) / 1000);
       if (tau < 30 || tau > 3600) continue; // only 30s-1hr contracts
       
@@ -1753,8 +1755,8 @@ async function noBook() {
       if (spread > 0.05) continue; // skip wide spreads
       
       // Edge = fair - ask (we buy NO at ask, fair says NO should be 1-fair)
-      const edge = (1 - fair) - no_ask;
-      if (edge < 0.008) continue; // MINIMUM 0.8% edge - raised from 0.1%
+      const edge = fair - no_ask; // fair is the NO probability; edge = NO fair - NO ask
+      if (edge < 0.004) continue; // MINIMUM 0.4% edge
       
       // Kelly with cap
       const kelly = Math.max(0, edge / (1 - no_ask));
@@ -1809,14 +1811,18 @@ async function noBook() {
 // Fetch ALL tradable Kalshi series (not just LANES)
 async function getAllTradableSeries() {
   try {
-    const res = await kalshi.raw('GET', '/trade-api/v2/markets?status=open&limit=500');
-    const data = await res.json();
-    const seriesSet = new Set();
+    const data = await kalshi.raw('dry', 'GET', '/markets', { query: { status: 'open', limit: 500 } });
+    
+    const bySeries = new Map();
     for (const m of data.markets || []) {
       const s = m.series_ticker || m.ticker.split('-')[0];
-      if (s) seriesSet.add(s);
+      const rec = bySeries.get(s) || { oi: 0 };
+      rec.oi += Number(m.open_interest_fp) || 0;
+      bySeries.set(s, rec);
     }
-    return Array.from(seriesSet);
+    const lanesSeries = Array.from(new Set(LANES.flatMap(l => l.seriesList || []).filter(Boolean)));
+    const ranked = Array.from(bySeries.entries()).map(([s, r]) => ({ s, oi: r.oi })).sort((a, b) => b.oi - a.oi).map(x => x.s);
+    return Array.from(new Set([...lanesSeries, ...ranked])).slice(0, 30);
   } catch (e) {
     // Fallback to LANES series
     return Array.from(new Set(LANES.flatMap(l => l.seriesList || []).filter(Boolean)));
@@ -2641,7 +2647,7 @@ function analysisPayload(strategy) {
 
 
 async function runAllNoEngine() {
-  if (state.mode === 'live') return; // ALL NO is not wired to real orders in LIVE yet
+  if (state.mode === 'live') return runAllNoLive(); // ALL NO places real orders in LIVE
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
   if (!noLs || !noLs.running) return;
@@ -2677,8 +2683,52 @@ async function runAllNoEngine() {
   }
 }
 
+async function runAllNoLive() {
+  const rows = await noBook();
+  const cfg = state.runtime.all_no;
+  const cash = LO.cash() || 0;
+  const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
+  const pending = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets');
+  const exposure = open.reduce((a, p) => a + p.cost, 0) + pending.reduce((a, o) => a + Math.max(0, o.qty - (o.filled || 0)) * o.price, 0);
+  if (cash <= 0 || exposure >= cash * cfg.max_exposure_pct) return;
+  if (open.length + pending.length >= cfg.max_concurrent) return;
+  const busy = new Set(open.map(p => p.market_id));
+  pending.forEach(o => busy.add(o.ticker));
+  for (const r of rows) {
+    if (r.edge < cfg.min_edge || r.kelly <= 0 || r.confidence < cfg.min_confidence) continue;
+    if (r.spread < cfg.min_spread || r.spread > cfg.max_spread) continue;
+    if (r.tau < cfg.min_tau_sec || r.tau > cfg.max_tau_sec) continue;
+    if (busy.has(r.market_id)) continue;
+    const q = await quoteForTicker(r.market_id);
+    if (!q || q.exchange_index == null) continue;
+    const lane = { name: 'all_no_markets', horizon: 'no-side' };
+    const rec = await LO.openEntry(lane, q, 'NO', r.limit_entry, r.fair, r.edge, null);
+    if (rec) busy.add(r.market_id);
+    const openNow = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0).length;
+    const pendingNow = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets').length;
+    if (openNow + pendingNow >= cfg.max_concurrent) break;
+  }
+  syncAllNoView();
+}
+
+function syncAllNoView() {
+  const book = state.all_no.live;
+  if (!book) return;
+  const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
+  book.positions = open.map(p => ({
+    id: p.id, market_id: p.market_id, side: 'NO', entry_price: p.entry_price,
+    quantity: p.qty, cost: p.cost, fair_at_entry: p.fair_at_entry, edge: p.edge_at_entry,
+    kelly: 0, stop_loss: p.stop_loss, take_profit: p.take_profit, confidence: 0,
+    expiration: p.close_time, status: 'resting', opened_at: p.opened, mark: p.mark || p.entry_price, pnl: 0,
+  }));
+  book.closed_trades = state.live.closed.filter(t => t.strategy === 'all_no_markets');
+  book.entries = book.closed_trades.length;
+  book.total_pnl = book.closed_trades.reduce((a, t) => a + t.pnl, 0);
+  book.balance = LO.cash();
+}
+
 async function runAllNoExits() {
-  if (state.mode === 'live') return; // ALL NO is not wired to real orders in LIVE yet
+  if (state.mode === 'live') return; // ALL NO exits are handled by markLivePositions (real orders)
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
   if (!noLs || !noLs.running) return;

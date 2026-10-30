@@ -262,12 +262,12 @@ function create(deps) {
     log('live_shard_transfer', { from: 0, to: target, dollars: amount });
     await kalshi.transferBetweenShards(amount, 0, target);
     // Transfers settle asynchronously. Poll the balance until the shard shows the money.
-    for (let i = 0; i < 12; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
       await readBalance();
       if (shardBalance(target) >= dollarsNeeded) return { ok: true, moved: amount };
     }
-    return { ok: false, reason: 'transfer to shard ' + target + ' not settled after 18 seconds' };
+    return { ok: false, reason: 'transfer to shard ' + target + ' not settled after 60 seconds' };
   }
 
   // ---- order facts ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ function create(deps) {
   async function openEntry(lane, q, side, price, fair, edge, sigma) {
     const s = st();
     const ls = laneState(lane.name);
-    if (pendingEntries().some((o) => o.lane === lane.name)) {
+    if (pendingEntries().some((o) => o.lane === lane.name && o.ticker === q.ticker)) {
       ls.skips++; ls.last_skip = 'entry already resting for this lane';
       return null;
     }
