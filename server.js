@@ -2559,7 +2559,9 @@ async function handle(req, res) {
   // --- snapshot + stream
   if (p === '/api/snapshot') {
     const b = u.searchParams.get('book');
-    return json(res, snapshotPayload(b === 'dry' ? 'dry' : (b === 'dry' ? 'dry' : undefined)));
+    const live = await liveAccountPayload();
+    const portfolio = await getLivePortfolio();
+    return json(res, snapshotPayload(b === 'dry' ? 'dry' : 'live', { live, portfolio }));
   }
   if (p === '/api/stream') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
