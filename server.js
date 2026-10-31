@@ -1212,7 +1212,7 @@ function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
   }
   const ls = laneState(pos.strategy);
   ls.trades++;
-  if (pnl > 0) ls.wins++; else ls.losses++;
+  if (pnl > 0) ls.wins++; else { ls.losses++; ls.loss_cooldown_until = Date.now() + 600000; }
   ls.realized = Number((ls.realized + pnl).toFixed(2));
   ls.heartbeat = new Date().toISOString();
   log('live_exit', { strategy: pos.strategy, market: pos.market_id, side: pos.side, qty: qtyX, entry: pos.entry_price, exit: exitPrice, reason, pnl, fees: trade.fees });
@@ -1267,7 +1267,7 @@ function closeLivePosition(pos, exitPrice, reason, result) {
   
   const ls = laneState(pos.strategy);
   ls.trades++;
-  if (pnl > 0) ls.wins++; else ls.losses++;
+  if (pnl > 0) ls.wins++; else { ls.losses++; ls.loss_cooldown_until = Date.now() + 600000; }
   ls.realized = Number((ls.realized + pnl).toFixed(2));
   ls.heartbeat = new Date().toISOString();
   log('live_close', { strategy: pos.strategy, market: pos.market_id, side: pos.side, entry: pos.entry_price, exit: exitPrice, reason, pnl, result: result || '', fill_quality: fillQuality });
@@ -1343,7 +1343,9 @@ async function engineTick() {
     if (!s || !Number.isFinite(s.price)) { ls.skips++; ls.last_skip = 'spot feed ' + lane.spot + ' not ready'; continue; }
     if (q.strike == null) { ls.skips++; ls.last_skip = 'market has no strike'; continue; }
     const tau = Math.max(0, (new Date(q.close_time).getTime() - Date.now()) / 1000);
-    if (tau < 10) { ls.skips++; ls.last_skip = 'contract closes in ' + Math.round(tau) + 's'; continue; }
+    if (ls.loss_cooldown_until && Date.now() < ls.loss_cooldown_until) { ls.skips++; ls.last_skip = 'loss cooldown ' + Math.round((ls.loss_cooldown_until - Date.now()) / 1000) + 's'; continue; }
+    if (q.yes_ask != null && q.yes_bid != null && (q.yes_ask - q.yes_bid) > 0.02) { ls.skips++; ls.last_skip = 'wide spread ' + (q.yes_ask - q.yes_bid).toFixed(3); continue; }
+    if (tau < 60) { ls.skips++; ls.last_skip = 'contract closes in ' + Math.round(tau) + 's'; continue; }
     const perSec = perSecondVol(lane.spot, 900);
     
     // Get lane-specific config (self-aware trading logic)
