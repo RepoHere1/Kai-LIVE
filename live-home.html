@@ -1523,9 +1523,9 @@ es.onmessage = e => {
 // Kalshi numbers move, so the page refetches exactly when there is
 // something new. The interval below is fallback only.
 es.addEventListener('snapshot', () => { refresh(); });
-['strategy', 'alert', 'config'].forEach(n =>
   let _sr = 0;
   function streamRefresh() { const now = Date.now(); if (now - _sr < 2000) return; _sr = now; safeRun(refreshFeeds, 'sse-feed'); if (typeof refresh === 'function') try { refresh(); } catch (e) { } }
+['strategy', 'alert', 'config'].forEach(n =>
   es.addEventListener(n, e => { note(n + ': ' + e.data); streamRefresh(); }));
   ['account', 'fill', 'position'].forEach(n => es.addEventListener(n, () => streamRefresh()));
 es.onerror = () => note('stream disconnected - retrying...');
@@ -2657,7 +2657,7 @@ setInterval(tickClock, 500);
 safeDraw(drawChart, 'account');
 safeDraw(drawSparks, 'sparks');
 // initial market paint driven by refresh()
-safeRun(() => if (LIVE.accounts && LIVE.accounts.live) paintAccount(LIVE.accounts.live), 'paintAccount');
+safeRun(() => { if (LIVE.accounts && LIVE.accounts.live) paintAccount(LIVE.accounts.live); }, 'paintAccount');
 safeRun(loadLogs, 'loadLogs');
 
 safeRun(refresh, 'refresh');
