@@ -142,7 +142,8 @@
       .tile .v{font-size:22px}
       .tools input{width:100%}
     }
-  </style>
+  body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge{color:#e9e9e9}a{color:#7db2ff}input,select,textarea{color:#e9e9e9;background:#1c1c1c}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -245,10 +246,12 @@ Every row below is a *NO* LANE contract entered with a <b>resting limit order</b
 </div>
 
 <script>
+function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
+
   function $ (id) { return document.getElementById(id); }
   function formatCurrency(n) { return '$' + n.toFixed(2); }
   function formatPercent(n) { return n.toFixed(1) + '%'; }
-  function formatCent(n) { return (n * 100).toFixed(1) + 'Â¢'; }
+  function formatCent(n) { return (n * 100).toFixed(1) + '¢'; }
   
   async function loadAllNo() {
     try {
@@ -260,7 +263,7 @@ Every row below is a *NO* LANE contract entered with a <b>resting limit order</b
       }
       
       // Update timestamp
-      $('stamp').textContent = 'Rendered ' + new Date().toLocaleString();
+      $('stamp').textContent = 'Rendered ' + fmtDT(new Date());
       
       // Populate book tallies
       const book = d.book || { balance: 250, starting: 250, pnl: 0, entries: 0, mode: 'dry' };
@@ -319,7 +322,7 @@ Every row below is a *NO* LANE contract entered with a <b>resting limit order</b
           '<td>' + (r.expiration ? r.expiration.split('T')[0] : '—') + '</td>' +
           '<td><span class="badge ' + (r.status === 'closing' ? 'closing' : 'open') + '">' + r.status + '</span></td>' +
           '<td><span class="badge ' + (r.mode === 'live' ? 'live' : 'dry') + '">' + r.mode.toUpperCase() + '</span></td>' +
-          '<td class="mono">' + (r.timestamp ? r.timestamp.substring(0, 16).replace('T', ' ') : '—') + '</td>' +
+          '<td class="mono">' + (r.timestamp ? fmtDT(r.timestamp) : '—') + '</td>' +
           '<td><button class="btn-exit" onclick="promptExit(\'' + r.id + '\', \'' + r.market_id + '\')">EXIT</button></td>' +
           '</tr>'
         ).join('');
@@ -351,8 +354,8 @@ Every row below is a *NO* LANE contract entered with a <b>resting limit order</b
           '<td class="num">' + r.fee_paid.toFixed(3) + '</td>' +
           '<td>' + (r.exit_reason || '—') + '</td>' +
           '<td><span class="badge ' + (r.mode === 'live' ? 'live' : 'dry') + '">' + r.mode.toUpperCase() + '</span></td>' +
-          '<td class="mono">' + (r.entry_timestamp ? r.entry_timestamp.substring(0, 16).replace('T', ' ') : '—') + '</td>' +
-          '<td class="mono">' + (r.exit_timestamp ? r.exit_timestamp.substring(0, 16).replace('T', ' ') : '—') + '</td>' +
+          '<td class="mono">' + (r.entry_timestamp ? fmtDT(r.entry_timestamp) : '—') + '</td>' +
+          '<td class="mono">' + (r.exit_timestamp ? fmtDT(r.exit_timestamp) : '—') + '</td>' +
           '</tr>'
         ).join('');
       } else {

@@ -390,6 +390,7 @@ button.loading.yellow::after {
   font-size: 11px;
   margin-top: 8px;
 }
+body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge{color:#e9e9e9}a{color:#7db2ff}input,select,textarea{color:#e9e9e9;background:#1c1c1c}
 </style>
 </head>
 <body data-mode="dry">
@@ -1492,7 +1493,9 @@ button.loading.yellow::after {
 <footer>Kai-LIVE &middot; prediction-market automation &middot; not financial advice</footer>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
+</script>
 <script>
 // Server-rendered snapshot: the page is already correct before any fetch runs,
 // and the poller below refreshes the exact same payload in place.
