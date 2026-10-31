@@ -2737,10 +2737,16 @@ async function runAllNoLive() {
     if (r.spread < cfg.min_spread || r.spread > cfg.max_spread) continue;
     if (r.tau < cfg.min_tau_sec || r.tau > cfg.max_tau_sec) continue;
     if (busy.has(r.market_id)) continue;
+    const lastTry = state.runtime.all_no._last_try || (state.runtime.all_no._last_try = {});
+    if (lastTry[r.market_id] && Date.now() - lastTry[r.market_id] < 90000) continue;
+    lastTry[r.market_id] = Date.now();
     const q = await quoteForTicker(r.market_id);
     if (!q || q.exchange_index == null) continue;
     const lane = { name: 'all_no_markets', horizon: 'no-side' };
-    const rec = await LO.openEntry(lane, q, 'NO', r.limit_entry, r.fair, r.edge, null);
+    // Post at the LIVE stream NO bid, not the scan-time bid: the scan quote is stale by the
+    // time the order posts, which caused most orders to be rejected as 'post only cross'.
+    const entryPx = q.no_bid != null ? q.no_bid : r.limit_entry;
+    const rec = await LO.openEntry(lane, q, 'NO', entryPx, r.fair, r.edge, null);
     if (rec) busy.add(r.market_id);
     const openNow = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0).length;
     const pendingNow = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets').length;
