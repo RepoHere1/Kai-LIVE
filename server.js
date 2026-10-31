@@ -2581,7 +2581,7 @@ async function handle(req, res) {
     }
 
   // --- snapshot + stream
-  if (p === '/api/snapshot') {
+  if (p === '/api/live') {
     const b = u.searchParams.get('book');
     const live = await liveAccountPayload();
     const portfolio = await getLivePortfolio();

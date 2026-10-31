@@ -1499,10 +1499,10 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
 <script>
 // Server-rendered snapshot: the page is already correct before any fetch runs,
 // and the poller below refreshes the exact same payload in place.
-const SNAPSHOT = {"__KAI_SNAPSHOT_PLACEHOLDER__":true};
-SNAPSHOT.mode = SNAPSHOT.mode || { mode: 'dry' };
+let LIVE = { book:'', mode:{mode:'dry'}, balance:null, accounts:{}, strategy_cards:[], equity:{labels:[],pnl:[]}, kalshi:{}, generated_at:null };
+LIVE.mode = LIVE.mode || { mode: 'dry' };
 const EQUITY = { labels: [], pnl: [] };
-Object.assign(EQUITY, SNAPSHOT.equity || {});
+Object.assign(EQUITY, LIVE.equity || {});
 const $ = id => document.getElementById(id);
 const esc = v => String(v == null ? '' : v);
 let recentTradesPage = 1;
@@ -1542,7 +1542,7 @@ function sgn(v) { return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
 function money(v) { return '$' + Number(v || 0).toFixed(2); }
 
 function mktTitle(ticker) {
-  return (SNAPSHOT.market_titles || {})[ticker] || ticker || '';
+  return (LIVE.market_titles || {})[ticker] || ticker || '';
 }
 
 async function loadRecentTrades(page) {
@@ -1776,10 +1776,10 @@ function paint(s) {
   set('tRunning', s.running_count || 0);
   set('tUptime', Math.floor((s.uptime_sec || 0) / 60) + 'm');
 
-  SNAPSHOT.equity = s.equity || SNAPSHOT.equity;
+  LIVE.equity = s.equity || LIVE.equity;
   paintCards(s.strategy_cards);
   paintStrategyPerformance(s.strategy_cards);
-  const eq = SNAPSHOT.equity || {};
+  const eq = LIVE.equity || {};
   const closes = (eq.pnl || []).length;
   set('pnlSummary', closes
     ? closes + ' closed trades'
@@ -1812,7 +1812,7 @@ function paintStrategyPerformance(cards) {
 
 function paintCards(cards) {
   if (!cards) return;
-  SNAPSHOT.strategy_cards = cards;
+  LIVE.strategy_cards = cards;
   cards.forEach(c => {
     const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set('c-' + c.name + '-trades', c.trades);
@@ -1855,7 +1855,8 @@ function paintCards(cards) {
 
 async function refresh() {
   try {
-    paint(await fetch('/api/snapshot?book=live').then(r => r.json()));
+    LIVE = await fetch('/api/live?book=live').then(r => r.json());
+    paint(LIVE);;
     drawChart();
     // Keep an open detail view current without yanking the page around.
     if (openName) openStrategy(openName, true);
@@ -1968,7 +1969,7 @@ async function toggleNoLanes() {
 }
 
 // Paint the NO LANES button state. Called after a toggle and after a mode
-// switch reload. The button reads its state from SNAPSHOT (which carries
+// switch reload. The button reads its state from LIVE (which carries
 // no_lanes_enabled from _mode_payload).
 function paintNoLanes(enabled) {
   const btn = $('noLanesBtn');
@@ -1984,11 +1985,11 @@ async function syncNoLanesFromServer(why) {
     paintNoLanes(d.no_lanes_enabled === true);
     if (why) note('NO LANES resynced from server' + (why ? ' - ' + why : ''));
   } catch (_) {
-    paintNoLanes(SNAPSHOT.no_lanes_enabled === true);
+    paintNoLanes(LIVE.no_lanes_enabled === true);
   }
 }
 
-// Re-read the authoritative mode after any ambiguous switch attempt. SNAPSHOT is
+// Re-read the authoritative mode after any ambiguous switch attempt. LIVE is
 // a rendering of the page as it was served; it cannot describe a mode change that
 // happened after that.
 
@@ -2023,7 +2024,7 @@ async function toggleStrategy(name, quiet, desiredState) {
   if (typeof desiredState === 'boolean') {
     wantedRunning = desiredState;
   } else {
-    const card = (SNAPSHOT.strategy_cards || []).find(c => c.name === name);
+    const card = (LIVE.strategy_cards || []).find(c => c.name === name);
     wantedRunning = !!card && !card.running;
   }
 
@@ -2313,7 +2314,7 @@ async function refreshFeeds() {
 const sparks = {};
 function drawSparks(cards) {
   if (typeof Chart === 'undefined') return;
-  (cards || SNAPSHOT.strategy_cards || []).forEach(c => {
+  (cards || LIVE.strategy_cards || []).forEach(c => {
     const ctx = $('spark-' + c.name);
     if (!ctx) return;
     if (typeof Chart === 'undefined') return;
@@ -2559,7 +2560,7 @@ async function startAllLive() {
   try {
     // OPERATOR LAW: Start all is a burst of immediate operator toggles. Each
     // lane flips the instant its request lands — no polling, no waiting.
-    const names = (SNAPSHOT.strategy_cards || []).filter(c => !c.running).map(c => c.name);
+    const names = (LIVE.strategy_cards || []).filter(c => !c.running).map(c => c.name);
     if (!names.length) { note('all lanes already running'); return; }
     for (const n of names) await toggleStrategy(n, true, true);
     note('LIVE started: ' + names.join(', '));
@@ -2570,7 +2571,7 @@ async function startAllLive() {
 }
 
 async function stopAll() {
-  const names = (SNAPSHOT.strategy_cards || []).filter(c => c.running).map(c => c.name);
+  const names = (LIVE.strategy_cards || []).filter(c => c.running).map(c => c.name);
 
   // Find the "Stop all" button (not the LIVE kill button) - it says "Stop all" onclick
   const stopAllBtn = Array.from(document.querySelectorAll('button')).find(b =>
@@ -2656,7 +2657,7 @@ setInterval(tickClock, 500);
 safeDraw(drawChart, 'account');
 safeDraw(drawSparks, 'sparks');
 // initial market paint driven by refresh()
-safeRun(() => paintAccount(SNAPSHOT.accounts.live), 'paintAccount');
+safeRun(() => if (LIVE.accounts && LIVE.accounts.live) paintAccount(LIVE.accounts.live), 'paintAccount');
 safeRun(loadLogs, 'loadLogs');
 
 safeRun(refresh, 'refresh');
