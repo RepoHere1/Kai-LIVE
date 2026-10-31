@@ -1213,7 +1213,7 @@ function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
   const ls = laneState(pos.strategy);
   ls.trades++;
   if (pnl > 0) ls.wins++; else {
-  ls.losses++; ls.loss_cooldown_until = Date.now() + 600000;
+  ls.losses++; ls.loss_cooldown_until = Date.now() + (state.runtime.loss_cooldown_sec || 600) * 1000;
   if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
     state.clip_state = state.clip_state || { base: 3, max: 25, ratchet_until: 0 };
     state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
@@ -1275,7 +1275,7 @@ function closeLivePosition(pos, exitPrice, reason, result) {
   const ls = laneState(pos.strategy);
   ls.trades++;
   if (pnl > 0) ls.wins++; else {
-  ls.losses++; ls.loss_cooldown_until = Date.now() + 600000;
+  ls.losses++; ls.loss_cooldown_until = Date.now() + (state.runtime.loss_cooldown_sec || 600) * 1000;
   if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
     state.clip_state = state.clip_state || { base: 3, max: 25, ratchet_until: 0 };
     state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
@@ -1358,8 +1358,8 @@ async function engineTick() {
     if (q.strike == null) { ls.skips++; ls.last_skip = 'market has no strike'; continue; }
     const tau = Math.max(0, (new Date(q.close_time).getTime() - Date.now()) / 1000);
     if (ls.loss_cooldown_until && Date.now() < ls.loss_cooldown_until) { ls.skips++; ls.last_skip = 'loss cooldown ' + Math.round((ls.loss_cooldown_until - Date.now()) / 1000) + 's'; continue; }
-    if (q.yes_ask != null && q.yes_bid != null && (q.yes_ask - q.yes_bid) > 0.02) { ls.skips++; ls.last_skip = 'wide spread ' + (q.yes_ask - q.yes_bid).toFixed(3); continue; }
-    if (tau < 60) { ls.skips++; ls.last_skip = 'contract closes in ' + Math.round(tau) + 's'; continue; }
+    if (q.yes_ask != null && q.yes_bid != null && (q.yes_ask - q.yes_bid) > (state.runtime.max_spread || 0.02)) { ls.skips++; ls.last_skip = 'wide spread ' + (q.yes_ask - q.yes_bid).toFixed(3); continue; }
+    if (tau < (state.runtime.min_tau_sec || 60)) { ls.skips++; ls.last_skip = 'contract closes in ' + Math.round(tau) + 's'; continue; }
     const perSec = perSecondVol(lane.spot, 900);
     
     // Get lane-specific config (self-aware trading logic)
@@ -2023,6 +2023,7 @@ function log(kind, obj) {
   noteProvenance({ kind, ...obj, at: line.at });
   save();
 }
+let lastServedView = null;
 const clients = new Set();
 function broadcast(event, data) {
   const payload = 'event: ' + event + '\ndata: ' + String(data).replace(/\n/g, ' ') + '\n\n';
@@ -2601,8 +2602,11 @@ async function handle(req, res) {
     const b = u.searchParams.get('book');
     const live = await liveAccountPayload();
     const portfolio = await getLivePortfolio();
-    return json(res, snapshotPayload(b === 'dry' ? 'dry' : 'live', { live, portfolio }));
+    const _out = snapshotPayload(b === 'dry' ? 'dry' : 'live', { live, portfolio });
+    lastServedView = { served_at: new Date().toISOString(), book: _out.book, balance: _out.balance, kalshi_age_sec: _out.kalshi_age_sec, held: (_out.kalshi || {}).held_count, exposure: (_out.kalshi || {}).exposure, realized: (_out.kalshi || {}).realized, cards: (_out.strategy_cards || []).length, generated_at: _out.generated_at };
+    return json(res, _out);
   }
+  if (p === '/api/view') { if (lastServedView) return json(res, lastServedView); const _o = snapshotPayload('live', { live: await liveAccountPayload() }); return json(res, { served_at: new Date().toISOString(), book: _o.book, balance: _o.balance, kalshi_age_sec: _o.kalshi_age_sec, held: (_o.kalshi || {}).held_count, exposure: (_o.kalshi || {}).exposure, realized: (_o.kalshi || {}).realized, cards: (_o.strategy_cards || []).length, generated_at: _o.generated_at }); }
   if (p === '/api/stream') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.write('event: ' + 'snapshot' + '\ndata: ' + JSON.stringify({ at: new Date().toISOString() }) + '\n\n');
