@@ -2736,10 +2736,12 @@ async function runAllNoLive() {
     if (r.edge < cfg.min_edge || r.kelly <= 0 || r.confidence < cfg.min_confidence) continue;
     if (r.spread < cfg.min_spread || r.spread > cfg.max_spread) continue;
     if (r.tau < cfg.min_tau_sec || r.tau > cfg.max_tau_sec) continue;
-    // WINNING pattern only: buy NO when the model says NO is >=70% likely and the NO costs <=30c.
-    // Capped downside + high probability is the one profile with positive expectancy under maker
-    // adverse selection; everything else bleeds on stops (that is what the 18.8% win rate was).
-    if (r.fair < 0.70 || r.limit_entry > 0.30) continue;
+    // WINNING pattern (configurable): buy NO when the model says NO is >= min_fair likely and the
+    // NO costs <= max_no_price. Capped downside + high probability = positive expectancy. Defaults
+    // are deep (70% / 30c); the operator can widen via runtime.all_no.min_fair / max_no_price.
+    const minFair = cfg.min_fair || 0.70;
+    const maxNoPx = cfg.max_no_price || 0.30;
+    if (r.fair < minFair || r.limit_entry > maxNoPx) continue;
     if (busy.has(r.market_id)) continue;
     const lastTry = state.runtime.all_no._last_try || (state.runtime.all_no._last_try = {});
     if (lastTry[r.market_id] && Date.now() - lastTry[r.market_id] < 90000) continue;
