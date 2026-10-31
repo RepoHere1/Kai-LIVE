@@ -1416,7 +1416,7 @@ async function engineTick() {
     // Kelly sizing check (lane-specific)
     const kellyFraction = Math.max(0, result.edge / (1 - price));
     const kellyCap = lc.kelly_cap ?? state.runtime.kelly_cap ?? 0.4;
-    if (kellyFraction < 0.01) { ls.skips++; ls.last_skip = 'kelly too small'; continue; }
+    if (kellyFraction < (state.runtime.min_kelly || 0.01)) { ls.skips++; ls.last_skip = 'kelly too small'; continue; }
 
     const lastEntry = ls.last_entry_at ? Date.now() - ls.last_entry_at : Infinity;
     const cooldownSec = lc.entry_cooldown_sec ?? state.runtime.entry_cooldown_sec ?? 60;
