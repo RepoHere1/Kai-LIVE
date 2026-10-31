@@ -24,7 +24,7 @@ const ENTRY_TTL_MS = 30 * 1000;
 const CANCEL_SETTLE_MS = 15 * 1000;
 const EXIT_RETRY_MS = 3 * 1000;
 const CASH_BUFFER = 0.10;
-const BALANCE_MIN_GAP_MS = 2000;
+const BALANCE_MIN_GAP_MS = 60 * 1000;
 const BALANCE_RECONCILE_MS = 5 * 60 * 1000;
 
 const f2 = (x) => (Math.round(x * 100) / 100).toFixed(2);
@@ -66,14 +66,10 @@ function create(deps) {
     } catch (e) {
       bal.error = String(e.message || e).slice(0, 240);
       log('live_balance_error', { error: bal.error });
-      const s = st();
-      if (s.live && s.live.last_balance && bal.cash == null) {
-        const last = s.live.last_balance;
-        bal.cash = last.cash; bal.breakdown = last.breakdown || [];
-        bal.portfolio_value = last.portfolio_value;
-        bal.at = Number(last.at) || Date.now();
-        bal.stale_from = last.at;
-      }
+      // No restore: a failed read means cash is UNKNOWN. Sizing must refuse rather than trade
+      // on stale money. The last good value stays in state.live.last_balance for the page,
+      // which flags it as STALE (429). Removing this restore fixed oversized orders that used
+      // the old $12.64 number while the real account had less.
       if (/429/.test(bal.error)) {
         bal.backoff_until = Date.now() + 60 * 1000;
         setTimeout(() => scheduleBalance(), 60 * 1000 + 500);
@@ -184,7 +180,10 @@ function create(deps) {
     return {
       as_of: bal.at ? new Date(bal.at).toISOString() : null,
       error: bal.error || streamError(),
-      cash: bal.cash,
+      // Display: the last confirmed value when fresh reads are failing, clearly marked STALE.
+      // Sizing NEVER uses this: openEntry reads bal.cash (null) and refuses.
+      cash: bal.cash != null ? bal.cash : ((st().live && st().live.last_balance) ? st().live.last_balance.cash : null),
+      balance_stale: bal.cash == null ? (bal.error || 'balance read failed') : null,
       breakdown: bal.breakdown,
       portfolio_value: bal.portfolio_value,
       positions,
