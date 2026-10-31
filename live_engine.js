@@ -239,7 +239,17 @@ function create(deps) {
     };
   }
 
-  function pendingExposure() {
+    function effectiveClip() {
+    const s = st();
+    const cs = s.clip_state || (s.clip_state = { base: 3, max: 25, ratchet_until: 0 });
+    if (cs.ratchet_until && Date.now() < cs.ratchet_until) return cs.base;
+    const equity = (bal.cash || 0) + pendingExposure();
+    const baseline = (s.live && s.live.starting_balance) || 10;
+    const target = Math.round(cs.base * Math.max(1, equity / baseline));
+    return Math.max(cs.base, Math.min(cs.max, target));
+  }
+
+function pendingExposure() {
     return pendingEntries().reduce((a, o) => a + Math.max(0, o.qty - (o.filled || 0)) * o.price, 0);
   }
 
@@ -364,7 +374,7 @@ function create(deps) {
     const target = Number.isInteger(q.exchange_index) ? q.exchange_index : 0;
     const movable = target === 0 ? 0 : shardBalance(0);
     const usable = shardBalance(target) + movable - pendingExposure() - CASH_BUFFER;
-    const budget = Math.min(Number(s.runtime.clip) || 0, usable);
+    const budget = Math.min(effectiveClip(), usable);
     const qty = Math.floor(budget / px);
     if (!(qty >= 1)) {
       ls.skips++; ls.last_skip = 'insufficient live cash for shard ' + target + ' ($' + usable.toFixed(2) + ' usable, 1 contract = $' + px.toFixed(2) + ')';

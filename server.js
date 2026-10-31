@@ -1212,7 +1212,14 @@ function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
   }
   const ls = laneState(pos.strategy);
   ls.trades++;
-  if (pnl > 0) ls.wins++; else { ls.losses++; ls.loss_cooldown_until = Date.now() + 600000; }
+  if (pnl > 0) ls.wins++; else {
+  ls.losses++; ls.loss_cooldown_until = Date.now() + 600000;
+  if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
+    state.clip_state = state.clip_state || { base: 3, max: 25, ratchet_until: 0 };
+    state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
+    log('clip_ratchet', { pnl, baseline: state.live.starting_balance || 10 });
+  }
+}
   ls.realized = Number((ls.realized + pnl).toFixed(2));
   ls.heartbeat = new Date().toISOString();
   log('live_exit', { strategy: pos.strategy, market: pos.market_id, side: pos.side, qty: qtyX, entry: pos.entry_price, exit: exitPrice, reason, pnl, fees: trade.fees });
@@ -1267,7 +1274,14 @@ function closeLivePosition(pos, exitPrice, reason, result) {
   
   const ls = laneState(pos.strategy);
   ls.trades++;
-  if (pnl > 0) ls.wins++; else { ls.losses++; ls.loss_cooldown_until = Date.now() + 600000; }
+  if (pnl > 0) ls.wins++; else {
+  ls.losses++; ls.loss_cooldown_until = Date.now() + 600000;
+  if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
+    state.clip_state = state.clip_state || { base: 3, max: 25, ratchet_until: 0 };
+    state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
+    log('clip_ratchet', { pnl, baseline: state.live.starting_balance || 10 });
+  }
+}
   ls.realized = Number((ls.realized + pnl).toFixed(2));
   ls.heartbeat = new Date().toISOString();
   log('live_close', { strategy: pos.strategy, market: pos.market_id, side: pos.side, entry: pos.entry_price, exit: exitPrice, reason, pnl, result: result || '', fill_quality: fillQuality });
