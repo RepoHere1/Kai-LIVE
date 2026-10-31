@@ -1493,7 +1493,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 <footer>Kai-LIVE &middot; prediction-market automation &middot; not financial advice</footer>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+<script src="/chart.umd.min.js">
 function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
 </script>
 <script>
@@ -1524,7 +1524,10 @@ es.onmessage = e => {
 // something new. The interval below is fallback only.
 es.addEventListener('snapshot', () => { refresh(); });
 ['strategy', 'alert', 'config'].forEach(n =>
-  es.addEventListener(n, e => note(n + ': ' + e.data)));
+  let _sr = 0;
+  function streamRefresh() { const now = Date.now(); if (now - _sr < 2000) return; _sr = now; safeRun(refreshFeeds, 'sse-feed'); if (typeof refresh === 'function') try { refresh(); } catch (e) { } }
+  es.addEventListener(n, e => { note(n + ': ' + e.data); streamRefresh(); }));
+  ['account', 'fill', 'position'].forEach(n => es.addEventListener(n, () => streamRefresh()));
 es.onerror = () => note('stream disconnected - retrying...');
 
 // --- snapshot refresh ---
