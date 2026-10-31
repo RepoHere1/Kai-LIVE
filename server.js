@@ -34,6 +34,7 @@ const sqlite3 = require('sqlite3').verbose();
 const kalshi = require('./kalshi');
 const kilo = require('./kilo');
 const brain = require('./brain_live');
+const series_kind = require('./series_kind');
 const { KalshiWS } = require('./kalshi_ws');
 const { CoinbaseWS } = require('./coinbase_ws');
 
@@ -1016,7 +1017,10 @@ function syntheticQuote(q, fair) {
 }
 
 async function activeQuote(lane) {
-  for (const series of (lane.seriesList || [lane.series]).filter(Boolean)) {
+    const staticSeries = (lane.seriesList || [lane.series]).filter(Boolean);
+  const discSeries = await series_kind.resolveFresh(lane.name);
+  if (discSeries && !staticSeries.includes(discSeries.series)) staticSeries.push(discSeries.series);
+  for (const series of staticSeries) {
     const res = await marketsForSeries(series, 8);
     const s = lane.spot ? spot[lane.spot] : null;
     const perSec = s ? perSecondVol(lane.spot, 900) : null;
@@ -1344,7 +1348,8 @@ async function engineTick() {
     // Build params for brain evaluation
     const volWindow = s.points.slice(-20).map(p => p.p);
     const fills = [];
-    const allQuotes = (act.open_markets > 0) ? [q] : [];
+        const chainRes = await fetchOptionsChain(q.series).catch(() => ({ markets: [] }));
+    const allQuotes = (chainRes.markets && chainRes.markets.length) ? chainRes.markets : ((act.open_markets > 0) ? [q] : []);
 
     // Evaluate with ensemble brain
     const result = brain.evaluate({
@@ -2880,6 +2885,7 @@ async function boot() {
   // so nothing can ever override the operator's button pushes — imperial law.
   try { exterminateSupervisors(); } catch (e) { }
   setInterval(() => { try { exterminateSupervisors(); } catch (e) { } }, 3000);
+  series_kind.start();
   LO.start();
   LIVE_STREAM.start();
   // Account state is streamed (LIVE_STREAM); the balance re-reads on fills, not on a timer.
