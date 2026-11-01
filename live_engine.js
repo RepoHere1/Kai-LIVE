@@ -326,6 +326,7 @@ function pendingExposure() {
         sigma_per_sec: rec.meta.sigma,
         strike: rec.meta.strike,
         horizon: rec.meta.horizon,
+        spot: rec.meta.spot_product || null,
         opened: rec.placed_at,
         close_time: rec.meta.close_time,
         source: 'live',
@@ -334,7 +335,8 @@ function pendingExposure() {
         ask_at_entry: rec.meta.ask_at_entry,
         entry_price: Number(entry.toFixed(4)),
         stop_loss: Number((entry * (1 - s.runtime.stop_loss)).toFixed(3)),
-        take_profit: Number(Math.min(0.99, entry + entry * 2 * s.runtime.stop_loss).toFixed(3)),
+        // Winners ride to settlement: take profit only near-certainty (0.95).
+        take_profit: Number(Math.min(0.98, 0.95).toFixed(3)),
         mark: Number(entry.toFixed(4)),
         qty: 0,
         cost: 0,
@@ -420,6 +422,7 @@ function pendingExposure() {
       meta: {
         title: q.title, series: q.series, close_time: q.close_time, horizon: lane.horizon,
         strike: q.strike, fair, edge, sigma,
+        spot_product: lane.spot || null,
         bid_at_entry: side === 'YES' ? q.yes_bid : q.no_bid,
         ask_at_entry: side === 'YES' ? q.yes_ask : q.no_ask,
       },

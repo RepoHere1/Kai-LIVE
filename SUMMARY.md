@@ -119,8 +119,8 @@ All original functionality has been preserved:
 
 ### 7. Comparison with Original
 
-| Feature | Node.js | Python | 
-|---------|--------|--------| 
+| Feature | Node.js | Python |
+|---------|--------|--------|
 | **Health Check** | `/api/health` | `/api/health` |
 | **Mode Info** | `/api/mode` | `/api/mode` |
 | **Configuration** | `/api/config` | `/api/config` |

@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -105,15 +105,15 @@ body::before{
   transition:border-color .18s ease, box-shadow .18s ease;
 }
 body[data-mode="dry"]{--mode-color:var(--up);--mode-glow:rgba(46,230,168,.32)}
-body[data-mode="live"]{--mode-color:var(--down);--mode-glow:rgba(161,0,0,.32)}
+body[data-mode="live"]{--mode-color:#FFA500;--mode-glow:rgba(255,165,0,.32)}
 /* Green border on every card when DRY - simulated money, clean frame */
 body[data-mode="dry"] .card{border:1px solid var(--up)}
 body[data-mode="dry"] .card:hover{border-color:var(--up)}
 body[data-mode="dry"] .tile{border:1px solid var(--up)}
-/* Red border on every card when LIVE - real money is leaving the account. */
-body[data-mode="live"] .card{border:1px solid var(--down)}
-body[data-mode="live"] .card:hover{border-color:var(--down)}
-body[data-mode="live"] .tile{border:1px solid var(--down)}
+/* Bright orange border on every card when LIVE - real money is leaving the account. */
+body[data-mode="live"] .card{border:1px solid #FFA500}
+body[data-mode="live"] .card:hover{border-color:#FFA500}
+body[data-mode="live"] .tile{border:1px solid #FFA500}
 /* The logo keeps its subtle red accent (it is the brand). */
 body[data-mode="live"] .brand .logo{border-color:rgba(77,159,255,.4);box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(43,108,255,.35)}
 body[data-mode="dry"]  .brand .logo{border-color:rgba(77,159,255,.4);box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(43,108,255,.35)}
@@ -773,7 +773,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
      and the panel is tall. -->
 <div class="panel" id="feedsPanel" style="margin-bottom:12px">
     <div class="ph" style="cursor:pointer" onclick="toggleFeeds()">
-      <h2>LIVE feeds &amp;amp; account — simulated</h2>
+      <h2>LIVE feeds &amp;amp; account - simulated</h2>
       <span class="note">
         <span id="feedToggle" style="cursor:pointer;font-weight:600">hide</span>
         &middot; synced 2026-10-19 11:56:37
@@ -813,7 +813,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 
       <div class="card" style="cursor:default" id="accountCard">
         <div class="ctop">
-          <div><div class="clabel" id="acctLabel">LIVE account — real Kalshi</div><div class="mono cname">live book</div></div>
+          <div><div class="clabel" id="acctLabel">LIVE account - real Kalshi</div><div class="mono cname">live book</div></div>
           <span class="pill ok" id="acctPill">LIVE</span>
         </div>
         <div class="cchart" style="height:130px"><canvas id="accountChart"></canvas></div>
@@ -856,7 +856,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
         <dt>Database path</dt><dd class="mono" style="color:var(--faint)">/data/trading_system.db</dd>
         <dt>Database backups</dt><dd id="dBackups">12 (every 6h, keeps 12)</dd>
       </dl>
-      
+
     </div>
   </div>
 
@@ -976,7 +976,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
     <table><thead><tr><th>Market</th><th>Title</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Qty</th><th class="num">BUY AMT $$$</th><th class="num">P&amp;L</th><th>Strategy</th><th>Exited</th></tr></thead><tbody id="recentTradesBody">
       <tr>
         <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
-          <td>ETH15M · Oct 16 2026 12:45</td>
+          <td>ETH15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.650</td>
         <td class="num">0.543</td>
@@ -988,7 +988,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
-          <td>ETH15M · Oct 16 2026 12:45</td>
+          <td>ETH15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.660</td>
         <td class="num">0.551</td>
@@ -1000,7 +1000,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
-          <td>HYPE15M · Oct 16 2026 12:45</td>
+          <td>HYPE15M - Oct 16 2026 12:45</td>
         <td>YES</td>
         <td class="num">0.520</td>
         <td class="num">0.585</td>
@@ -1012,7 +1012,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
-          <td>HYPE15M · Oct 16 2026 12:45</td>
+          <td>HYPE15M - Oct 16 2026 12:45</td>
         <td>YES</td>
         <td class="num">0.520</td>
         <td class="num">0.585</td>
@@ -1024,7 +1024,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
-          <td>ETH15M · Oct 16 2026 12:45</td>
+          <td>ETH15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.710</td>
         <td class="num">0.593</td>
@@ -1036,7 +1036,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.493</td>
@@ -1048,7 +1048,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
-          <td>HYPE15M · Oct 16 2026 12:45</td>
+          <td>HYPE15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.640</td>
         <td class="num">0.534</td>
@@ -1060,7 +1060,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161245-45">KXHYPE15M-26OCT161245-45</td>
-          <td>HYPE15M · Oct 16 2026 12:45</td>
+          <td>HYPE15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.640</td>
         <td class="num">0.534</td>
@@ -1072,7 +1072,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.660</td>
         <td class="num">0.551</td>
@@ -1084,7 +1084,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.660</td>
         <td class="num">0.551</td>
@@ -1096,7 +1096,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
-          <td>ETH15M · Oct 16 2026 12:45</td>
+          <td>ETH15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.650</td>
         <td class="num">0.705</td>
@@ -1108,7 +1108,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXETH15M-26OCT161245-45">KXETH15M-26OCT161245-45</td>
-          <td>ETH15M · Oct 16 2026 12:45</td>
+          <td>ETH15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.610</td>
         <td class="num">0.665</td>
@@ -1120,7 +1120,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.665</td>
@@ -1132,7 +1132,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.685</td>
@@ -1144,7 +1144,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
-          <td>HYPED · T78.9999</td>
+          <td>HYPED - T78.9999</td>
         <td>YES</td>
         <td class="num">0.640</td>
         <td class="num">0.570</td>
@@ -1156,7 +1156,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.655</td>
@@ -1168,7 +1168,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXXRP15M-26OCT161245-45">KXXRP15M-26OCT161245-45</td>
-          <td>XRP15M · Oct 16 2026 12:45</td>
+          <td>XRP15M - Oct 16 2026 12:45</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.655</td>
@@ -1180,7 +1180,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
-          <td>HYPED · T78.9999</td>
+          <td>HYPED - T78.9999</td>
         <td>YES</td>
         <td class="num">0.640</td>
         <td class="num">0.570</td>
@@ -1192,7 +1192,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
-          <td>HYPED · T78.9999</td>
+          <td>HYPED - T78.9999</td>
         <td>YES</td>
         <td class="num">0.710</td>
         <td class="num">0.610</td>
@@ -1204,7 +1204,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPED-26OCT1613-T78.9999">KXHYPED-26OCT1613-T78.99</td>
-          <td>HYPED · T78.9999</td>
+          <td>HYPED - T78.9999</td>
         <td>YES</td>
         <td class="num">0.710</td>
         <td class="num">0.593</td>
@@ -1216,7 +1216,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPED-26OCT1613-T79.2499">KXHYPED-26OCT1613-T79.24</td>
-          <td>HYPED · T79.2499</td>
+          <td>HYPED - T79.2499</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.670</td>
@@ -1228,7 +1228,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPED-26OCT1613-T79.2499">KXHYPED-26OCT1613-T79.24</td>
-          <td>HYPED · T79.2499</td>
+          <td>HYPED - T79.2499</td>
         <td>NO</td>
         <td class="num">0.590</td>
         <td class="num">0.670</td>
@@ -1240,7 +1240,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161230-30">KXHYPE15M-26OCT161230-30</td>
-          <td>HYPE15M · Oct 16 2026 12:30</td>
+          <td>HYPE15M - Oct 16 2026 12:30</td>
         <td>YES</td>
         <td class="num">0.690</td>
         <td class="num">0.620</td>
@@ -1252,7 +1252,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161230-30">KXHYPE15M-26OCT161230-30</td>
-          <td>HYPE15M · Oct 16 2026 12:30</td>
+          <td>HYPE15M - Oct 16 2026 12:30</td>
         <td>YES</td>
         <td class="num">0.740</td>
         <td class="num">0.618</td>
@@ -1264,7 +1264,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
       </tr>
       <tr>
         <td class="mono" title="KXHYPE15M-26OCT161230-30">KXHYPE15M-26OCT161230-30</td>
-          <td>HYPE15M · Oct 16 2026 12:30</td>
+          <td>HYPE15M - Oct 16 2026 12:30</td>
         <td>YES</td>
         <td class="num">0.580</td>
         <td class="num">0.495</td>
@@ -1317,7 +1317,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
     <ol class="steps">
       <li><b>Ingest</b> &mdash; pulls open markets from the Kalshi API and upserts prices into <code>markets</code>.</li>
       <li><b>Decide</b> &mdash; scores each eligible market with an LLM pass via OpenRouter, under a daily cost budget.</li>
-      <li><b>Execute</b> — sizes with full-Kelly and places orders, with price-sanity and fail-closed balance checks.</li>
+      <li><b>Execute</b> - sizes with full-Kelly and places orders, with price-sanity and fail-closed balance checks.</li>
       <li><b>Track</b> &mdash; monitors open positions and closes them on stop-loss, take-profit, time or resolution, writing each close to <code>trade_logs</code>.</li>
       <li><b>Evaluate</b> &mdash; aggregates realized P&amp;L, win rate and per-strategy attribution.</li>
     </ol>
@@ -1390,9 +1390,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:56:42,230 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:42,261 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:56:42,273 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:56:42,273 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:42,273 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:42,277 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:56:42,277 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:42,277 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:42,280 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:56:42,285 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:42,285 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:42[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1400,9 +1400,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:56:46,630 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:46,674 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:56:46,693 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:56:46,693 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:46,693 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:46,697 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:56:46,697 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:46,697 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:46,700 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:56:46,705 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:46,705 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:46[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1410,9 +1410,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:56:51,021 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:51,052 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:56:51,066 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:56:51,066 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:51,066 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:51,071 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:56:51,071 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:51,071 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:51,074 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:56:51,079 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:51,079 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:51[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1420,9 +1420,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:56:55,403 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:55,433 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:56:55,444 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:56:55,445 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:55,445 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:55,448 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:56:55,448 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:55,448 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:55,451 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:56:55,457 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:55,457 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:55[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1430,9 +1430,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:56:59,807 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:59,843 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:56:59,859 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:56:59,860 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:59,860 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:59,864 - trading_system.profit_taking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:56:59,864 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:56:59,864 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:59,866 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:56:59,870 - trading_system.position_tracking - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:56:59,871 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:56:59[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1440,9 +1440,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:57:04,182 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:04,211 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:57:04,223 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:57:04,223 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:04,223 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:04,227 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:57:04,227 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:04,227 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:04,230 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:57:04,234 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:04,234 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:04[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1450,9 +1450,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:57:08,549 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:08,582 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:57:08,596 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:57:08,596 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:08,596 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:08,600 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:57:08,600 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:08,600 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:08,603 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:57:08,608 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:08,608 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:08[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1460,9 +1460,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:57:12,959 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:12,987 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:57:12,998 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:57:12,998 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:12,998 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:12[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:13,001 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:57:13,002 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:13,002 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:13,006 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:57:13,017 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:13,017 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:13[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1470,9 +1470,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:57:17,336 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:17,372 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:57:17,388 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:57:17,388 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:17,388 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:17,393 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:57:17,393 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:17,393 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:17,397 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:57:17,401 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:17,402 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:17[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]
@@ -1480,9 +1480,9 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 2026-10-19 11:57:21,713 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mStarting enhanced position tracking job with sell limit orders.[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:21,742 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mPrivate key loaded successfully[0m [[34m[1mtrading_system.kalshiclient[0m]
 2026-10-19 11:57:21,755 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mKalshi client initialized     [0m [[34m[1mtrading_system.kalshiclient[0m] [36mapi_key_length[0m=[35m36[0m
-2026-10-19 11:57:21,755 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mðŸŽ¯ Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:21,755 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1m* Checking for profit-taking opportunities...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:21,759 - trading_system.profit_taking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mNo open positions to process for profit taking[0m [[34m[1mtrading_system.profit_taking[0m]
-2026-10-19 11:57:21,759 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mðŸ›¡ï¸ Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
+2026-10-19 11:57:21,759 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1m Checking for stop-loss protection...[0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:21,762 - trading_system.stop_loss_orders - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mNo open positions to process for stop-loss orders[0m [[34m[1mtrading_system.stop_loss_orders[0m]
 2026-10-19 11:57:21,767 - trading_system.position_tracking - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mNo open positions to track.   [0m [[34m[1mtrading_system.position_tracking[0m]
 2026-10-19 11:57:21,767 - trading_system.kalshiclient - INFO - [2m2026-10-19 11:57:21[0m [[32m[1minfo     [0m] [1mKalshi client closed          [0m [[34m[1mtrading_system.kalshiclient[0m]</pre></div>
@@ -1498,7 +1498,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
 </div>
 
 <script src="/chart.umd.min.js">
-function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
+function fmtDT(iso){if(!iso)return '-';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
 </script>
 <script>
 // Server-rendered snapshot: the page is already correct before any fetch runs,
@@ -1688,8 +1688,8 @@ function paint(s) {
   if (kr) kr.className = 'v ' + sgn(live.realized || 0);
   setLive('tKalshiPnlNote',
     'sales ' + money((live.fills || []).filter(f => f.action === 'sell').reduce((a, f) => a + (f.price || 0) * f.quantity, 0)) +
-    ' · settled ' + money(live.realized || 0) +
-    ' · ' + (live.closed_trades || 0) + ' closed trades');
+    ' - settled ' + money(live.realized || 0) +
+    ' - ' + (live.closed_trades || 0) + ' closed trades');
   // Also update the account panel stats
   const acctEq = $('acctEquity');
   if (acctEq) acctEq.textContent = money(s.balance == null ? 0 : s.balance);
@@ -1710,9 +1710,9 @@ function paint(s) {
     var ageEl = $('tBalanceAge');
     if (ageEl) {
       var age = s.kalshi_age_sec;
-      if (age == null || age < 0) { ageEl.textContent = '· syncing…'; ageEl.style.color = ''; }
-      else if (age > 180) { ageEl.textContent = '· STALE (' + Math.round(age / 60) + 'm old) — sync failing'; ageEl.style.color = '#ff5555'; }
-      else { ageEl.textContent = '· updated ' + age + 's ago'; ageEl.style.color = ''; }
+      if (age == null || age < 0) { ageEl.textContent = '- syncing...'; ageEl.style.color = ''; }
+      else if (age > 180) { ageEl.textContent = '- STALE (' + Math.round(age / 60) + 'm old) - sync failing'; ageEl.style.color = '#ff5555'; }
+      else { ageEl.textContent = '- updated ' + age + 's ago'; ageEl.style.color = ''; }
     }
     // Held contracts, not raw rows: Kalshi keeps a zero-share row per ticker the
     // account ever touched, and summing those reported 31 "positions" when 3
@@ -1721,11 +1721,11 @@ function paint(s) {
       ? k.held_count : (k.market_count || 0) + (k.event_count || 0);
     set('tLivePos', held);
     set('tLivePosNote',
-          (k.held_count || 0) + ' held · ' + (k.ghost_count || 0) +
+          (k.held_count || 0) + ' held - ' + (k.ghost_count || 0) +
           ' flat rows on Kalshi\'s side (no shares, cannot be deleted)');
     set('tExposure', money(k.exposure));
     set('tExposureNote',
-      'mark-to-market · ' + (k.cost_basis_known
+      'mark-to-market - ' + (k.cost_basis_known
         ? 'cost ' + money(k.cost_basis)
         : (k.realized_known
           ? 'cost unknown (' + (k.cost_basis_missing || 0) + ' holding' +
@@ -1737,9 +1737,9 @@ function paint(s) {
     const led = k.ledger || {};
     set('tKalshiPnlNote',
       'sales ' + money(led.sales_realized) +
-      ' · settled ' + money(led.settlement_realized) +
-      ' · fees ' + money(k.fees) +
-      (led.window_start ? ' · since ' + String(led.window_start).slice(0, 10) : ''));
+      ' - settled ' + money(led.settlement_realized) +
+      ' - fees ' + money(k.fees) +
+      (led.window_start ? ' - since ' + String(led.window_start).slice(0, 10) : ''));
 
     // The LIVE funding card on this page: the real production account.
     const lv = (s.accounts && s.accounts.live) || {};
@@ -2033,7 +2033,7 @@ async function toggleStrategy(name, quiet, desiredState) {
   }
 
   // OPERATOR LAW: a button push is IMMEDIATE, ABSOLUTE law. Paint the card to
-  // the operator's intent the INSTANT it is pressed — no polling, no loading
+  // the operator's intent the INSTANT it is pressed - no polling, no loading
   // wait, no "did the server accept it?" loop. The server applies the same
   // state synchronously; refresh() only reconciles the numbers afterwards.
   const paintNow = (running) => {
@@ -2194,7 +2194,7 @@ function paintMarket(md) {
   const pts = within(spot.points, SPOT_WINDOW);
   $('spotSource').textContent = spot.source || 'connecting...';
   $('spotAge').textContent = spot.price
-    ? '$' + Number(spot.price).toLocaleString() + '  ·  ' + (spot.age_sec != null ? spot.age_sec.toFixed(1) + 's old' : '')
+    ? '$' + Number(spot.price).toLocaleString() + '  -  ' + (spot.age_sec != null ? spot.age_sec.toFixed(1) + 's old' : '')
     : 'no tick yet';
   const pill = $('spotPill');
   if (pill) {
@@ -2203,7 +2203,7 @@ function paintMarket(md) {
   }
   const spotTrend = trend(pts.map(function (p) { return p.p; }));
   drawFeed('spotChart', pts.map(p => hhmmss(p.t)), [{
-    label: 'BTC-USD spot · 1 day', borderColor: spotTrend.line, backgroundColor: spotTrend.fill,
+    label: 'BTC-USD spot - 1 day', borderColor: spotTrend.line, backgroundColor: spotTrend.fill,
     data: pts.map(p => p.p), tension: 0.2, fill: true, pointRadius: 0, borderWidth: 2,
   }]);
 
@@ -2217,8 +2217,8 @@ function paintMarket(md) {
     kp.textContent = contract ? 'quoted' : 'no quote';
   }
   const set15 = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-  set15('k15Up', contract && contract.up_ask != null ? Math.round(contract.up_ask * 100) + '¢' : '--');
-  set15('k15Down', contract && contract.down_ask != null ? Math.round(contract.down_ask * 100) + '¢' : '--');
+  set15('k15Up', contract && contract.up_ask != null ? Math.round(contract.up_ask * 100) + 'c' : '--');
+  set15('k15Down', contract && contract.down_ask != null ? Math.round(contract.down_ask * 100) + 'c' : '--');
   set15('k15Target', contract && contract.target != null ? '$' + Number(contract.target).toLocaleString() : '--');
   // Countdown runs locally between polls so it ticks smoothly instead of
   // jumping every five seconds.
@@ -2227,16 +2227,16 @@ function paintMarket(md) {
   }
   tickClock();
   $('k15Detail').textContent = contract
-    ? (contract.title || 'up or down') + ' · ' + (k.tradable || 0) + ' quotable of ' + (k.open_markets || 0)
-      + (k.error ? ' · ' + k.error : '')
+    ? (contract.title || 'up or down') + ' - ' + (k.tradable || 0) + ' quotable of ' + (k.open_markets || 0)
+      + (k.error ? ' - ' + k.error : '')
     : 'waiting for the next contract';
   if (!contract && ctx_feed_error) {
-    $('k15Detail').textContent = 'feed offline — ' + ctx_feed_error;
+    $('k15Detail').textContent = 'feed offline - ' + ctx_feed_error;
   }
   const kTrend = trend(kpts.map(function (p) { return p.spot; }));
   drawFeed('k15Chart', kpts.map(p => hhmmss(p.t)), [
     {
-      label: 'spot · 15 min', borderColor: kTrend.line, backgroundColor: kTrend.fill,
+      label: 'spot - 15 min', borderColor: kTrend.line, backgroundColor: kTrend.fill,
       data: kpts.map(p => p.spot), tension: 0.2, pointRadius: 0, borderWidth: 2, fill: true,
     },
     {
@@ -2259,8 +2259,8 @@ function paintMarket(md) {
 
   const lead = md.lead || {};
   $('feedNote').textContent = lead.usable
-    ? 'streaming · ' + (lead.series || 'KXBTC15M') + ' live'
-    : (k.error ? 'streaming · Kalshi: ' + k.error : 'streaming');
+    ? 'streaming - ' + (lead.series || 'KXBTC15M') + ' live'
+    : (k.error ? 'streaming - Kalshi: ' + k.error : 'streaming');
 }
 
 let DEADLINE = 0;
@@ -2282,7 +2282,7 @@ function paintAccount(a) {
   set('acctEquity', money(a.equity));
   set('acctWin', (a.today ? a.today.win_rate : 0) + '%');
   set('acctOpen', a.open_positions);
-  set('acctFoot', 'cash ' + money(a.cash) + ' · ' + (a.today ? a.today.trades : 0) + ' trades today');
+  set('acctFoot', 'cash ' + money(a.cash) + ' - ' + (a.today ? a.today.trades : 0) + ' trades today');
   const pnl = $('acctToday');
   const v = a.today ? a.today.pnl : 0;
   if (pnl) {
@@ -2563,7 +2563,7 @@ async function startAllLive() {
 
   try {
     // OPERATOR LAW: Start all is a burst of immediate operator toggles. Each
-    // lane flips the instant its request lands — no polling, no waiting.
+    // lane flips the instant its request lands - no polling, no waiting.
     const names = (LIVE.strategy_cards || []).filter(c => !c.running).map(c => c.name);
     if (!names.length) { note('all lanes already running'); return; }
     for (const n of names) await toggleStrategy(n, true, true);
@@ -2590,7 +2590,7 @@ async function stopAll() {
 
   try {
     // OPERATOR LAW: Stop all is a burst of immediate operator toggles. Each lane
-    // goes dark the instant its request lands — no polling, no waiting.
+    // goes dark the instant its request lands - no polling, no waiting.
     for (const n of names) await toggleStrategy(n, true, false);
     note('stopped: ' + (names.join(', ') || 'nothing was running'));
     refresh();
@@ -2689,7 +2689,7 @@ function renderMonitoringPanels(d) {
 
   // 1. Edge Decay Curve
   let html = '<div class="monitor-grid">';
-  
+
   if (d.by_exit_reason) {
     html += '<div class="monitor-card">';
     html += '<h3>Exit Reason Breakdown</h3>';
@@ -2738,7 +2738,7 @@ function renderMonitoringPanels(d) {
   // 5. Execution Quality
   if (d.execution_quality) {
     html += '<div class="monitor-card">';
-    html += '<h3>Execution Quality (maker fill %)<span class="note">≤0 is maker</span></h3>';
+    html += '<h3>Execution Quality (maker fill %)<span class="note"><=0 is maker</span></h3>';
     html += '<table><thead><tr><th>Metric</th><th class="num">Value</th></tr></thead><tbody>';
     for (const [k, v] of Object.entries(d.execution_quality)) {
       const cls = v <= 0 ? 'up' : 'down';
@@ -2778,7 +2778,7 @@ async function toggleNoHeatmap() {
 function renderNoHeatmap(d) {
   const div = $('noHeatmap');
   if (!div || !d.open_rows) { div.innerHTML = '<p class="note">No data</p>'; return; }
-  
+
   // Group by edge buckets
   const buckets = {};
   for (const row of d.open_rows) {
@@ -2788,7 +2788,7 @@ function renderNoHeatmap(d) {
     buckets[edgeBucket].totalEdge += row.edge || 0;
     buckets[edgeBucket].totalQty += row.quantity || 0;
   }
-  
+
   let html = '<table><thead><tr><th>Edge</th><th>Positions</th><th>Avg Edge</th><th>Total Qty</th></tr></thead><tbody>';
   for (const [edge, b] of Object.entries(buckets).sort()) {
     html += '<tr><td>' + edge + '</td><td class="num">' + b.count + '</td><td class="num">' + (b.totalEdge / b.count).toFixed(4) + '</td><td class="num">' + b.totalQty + '</td></tr>';
@@ -2815,28 +2815,28 @@ function renderNoHeatmap(d) {
 
       // Regime Win Rate
       if (d.regime_win_rate && $('regimeWinRateBody')) {
-        $('regimeWinRateBody').innerHTML = d.regime_win_rate.map(r => 
+        $('regimeWinRateBody').innerHTML = d.regime_win_rate.map(r =>
           '<tr><td>' + esc(r.regime) + '</td><td class="num">' + r.trades + '</td><td class="num">' + r.wins + '</td><td class="num">' + r.win_rate + '%</td><td class="num">' + r.avg_edge.toFixed(4) + '</td></tr>'
         ).join('');
       }
 
       // Signal Attribution
       if (d.signal_attribution && $('signalAttrBody')) {
-        $('signalAttrBody').innerHTML = d.signal_attribution.map(r => 
+        $('signalAttrBody').innerHTML = d.signal_attribution.map(r =>
           '<tr><td>' + esc(r.signal) + '</td><td class="num">' + r.trades + '</td><td class="num">' + r.wins + '</td><td class="num">' + r.win_rate + '%</td><td class="num">' + r.weight.toFixed(2) + '</td></tr>'
         ).join('');
       }
 
       // Kelly Efficiency
       if (d.kelly_efficiency && $('kellyEffBody')) {
-        $('kellyEffBody').innerHTML = d.kelly_efficiency.map(r => 
+        $('kellyEffBody').innerHTML = d.kelly_efficiency.map(r =>
           '<tr><td>' + esc(r.trade) + '</td><td class="num">' + (r.kelly_pct * 100).toFixed(1) + '%</td><td class="num">' + (r.actual_pct * 100).toFixed(1) + '%</td><td class="num ' + (r.efficiency >= 1 ? 'up' : 'down') + '">' + r.efficiency.toFixed(2) + '</td><td class="num">' + r.edge.toFixed(4) + '</td></tr>'
         ).join('');
       }
 
       // Execution Quality
       if (d.execution_quality && $('execQualityBody')) {
-        $('execQualityBody').innerHTML = d.execution_quality.map(r => 
+        $('execQualityBody').innerHTML = d.execution_quality.map(r =>
           '<tr><td>' + esc(r.market) + '</td><td>' + esc(r.side) + '</td><td class="num">' + r.bid.toFixed(3) + '</td><td class="num">' + r.ask.toFixed(3) + '</td><td class="num">' + r.fill.toFixed(3) + '</td><td class="num ' + (r.quality <= 0 ? 'up' : 'down') + '">' + r.quality.toFixed(4) + '</td></tr>'
         ).join('');
       }
@@ -2862,10 +2862,10 @@ function renderNoHeatmap(d) {
         borderColor: 'rgba(255, 165, 0, 1)',
         pointRadius: 4
       }]},
-      options: { 
-        responsive: true, 
+      options: {
+        responsive: true,
         maintainAspectRatio: false,
-        scales: { 
+        scales: {
           x: { title: { display: true, text: 'Edge at Entry' } },
           y: { title: { display: true, text: 'Edge at Exit' } }
         },
@@ -2887,14 +2887,14 @@ function renderNoHeatmap(d) {
         borderColor: data.map(d => 'rgba(255, 165, 0, ' + (0.5 + 0.5 * (d.edge / maxEdge)) + ')'),
         pointRadius: 6
       }]},
-      options: { 
-        responsive: true, 
+      options: {
+        responsive: true,
         maintainAspectRatio: false,
-        scales: { 
+        scales: {
           x: { title: { display: true, text: 'Time to Expiry (min)' } },
           y: { title: { display: true, text: 'Model Fair' } }
         },
-        plugins: { 
+        plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: ctx => 'Edge: ' + ctx.raw.edge.toFixed(4) + ', Fair: ' + ctx.raw.y.toFixed(3) + ', Tau: ' + (ctx.raw.x).toFixed(1) + 'min' } }
         }
@@ -2952,9 +2952,9 @@ function renderNoHeatmap(d) {
             </tr>
           </thead>
           <tbody id="noBody">
-            
+
             <tr><td colspan="17" class="empty">No open *NO* LANE positions in this book &mdash; the up/down lanes keep their own clips, and this book has not placed one yet.</td></tr>
-            
+
           </tbody>
         </table>
       </div>

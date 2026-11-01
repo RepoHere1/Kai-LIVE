@@ -62,7 +62,7 @@ async function fetchShards() {
   const ts = Math.floor(Date.now() / 1000).toString();
   const fullPath = '/trade-api/v2' + route;
   const signature = sign('GET', fullPath, ts);
-  
+
   const headers = {
     'KALSHI-ACCESS-KEY': KEY_ID,
     'KALSHI-ACCESS-SIGNATURE': signature,
@@ -70,10 +70,10 @@ async function fetchShards() {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   };
-  
+
   const url = BASE + route;
   console.log('Fetching shard info from:', url);
-  
+
   // Retry on rate limit
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
@@ -81,22 +81,22 @@ async function fetchShards() {
       const text = await res.text();
       console.log('Response status:', res.status);
       console.log('Response body:', text.slice(0, 2000));
-      
+
       if (res.status === 429) {
         const retryAfter = parseInt(res.headers.get('retry-after') || '5') * 1000;
         console.log(`Rate limited, waiting ${retryAfter}ms before retry ${attempt}/5...`);
         await new Promise(r => setTimeout(r, retryAfter));
         continue;
       }
-      
+
       if (!res.ok) {
         console.error('Error:', text);
         return;
       }
-      
+
       const data = JSON.parse(text);
       console.log('\nParsed response:', JSON.stringify(data, null, 2));
-      
+
       // Extract exchange_index values from balance breakdown
       const breakdown = data.balance_breakdown || data.balance || [];
       if (Array.isArray(breakdown) && breakdown.length > 0) {
@@ -104,7 +104,7 @@ async function fetchShards() {
         for (const b of breakdown) {
           console.log(`exchange_index: ${b.exchange_index}, balance: $${b.balance || b.balance_dollars}, subaccount: ${b.subaccount || 'N/A'}`);
         }
-        
+
         // Update .env with discovered shards
         let envText = fs.readFileSync(ENV_FILE, 'utf8');
         const shardMap = {};
@@ -118,7 +118,7 @@ async function fetchShards() {
           if (b.exchange_index === 3) shardMap.KALSHI_SHARD_FINANCE = 3;
           if (b.exchange_index === 4) shardMap.KALSHI_SHARD_CRYPTO = 4;
         }
-        
+
         // Write back to .env
         for (const [key, val] of Object.entries(shardMap)) {
           const regex = new RegExp(`^${key}=.*`, 'm');
@@ -128,7 +128,7 @@ async function fetchShards() {
             envText += `\n${key}=${val}`;
           }
         }
-        
+
         // Add subaccount (default to 0 if not in response)
         const subaccount = 0;
         const subRegex = /^KALSHI_SUBACCOUNT=.*/m;
@@ -137,12 +137,12 @@ async function fetchShards() {
         } else {
           envText += `\nKALSHI_SUBACCOUNT=${subaccount}`;
         }
-        
+
         fs.writeFileSync(ENV_FILE, envText);
-        console.log('\n✅ Updated .env with shard IDs');
+        console.log('\n[OK] Updated .env with shard IDs');
       }
       return;
-      
+
     } catch (e) {
       console.error('Fetch error:', e.message);
       if (attempt < 5) await new Promise(r => setTimeout(r, 2000));

@@ -58,6 +58,11 @@ class KalshiWS {
     };
 
     this.ws.onerror = (err) => {
+      // Rate-limited: WS error storms (code 1006 reconnect loops) were
+      // flooding the log and straining the PC. One line per 30s max.
+      const now = Date.now();
+      if (this._lastErrLog && now - this._lastErrLog < 30000) return;
+      this._lastErrLog = now;
       try {
         const msg = err?.message || err?.code || (err && typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'unknown error';
         console.error('[KalshiWS] Error:', msg);

@@ -51,7 +51,7 @@ function Start-KaiLive {
     Start-Sleep -Milliseconds 500
     $h = Test-KaiLivePort
     if ($h) {
-      Write-Host ('✓ LIVE  pid ' + $p.Id + '  cash $' + [Math]::Round($h.live_balance, 2)) -ForegroundColor Red
+      Write-Host ('[OK] LIVE  pid ' + $p.Id + '  cash $' + [Math]::Round($h.live_balance, 2)) -ForegroundColor Red
       Write-Host ('open  ' + $Base + '/') -ForegroundColor Red
       return
     }

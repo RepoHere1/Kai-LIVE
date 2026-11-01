@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -7,7 +7,7 @@
 
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kai-Mirror — *NO* LANE MARKETS</title>
+  <title>Kai-Mirror - *NO* LANE MARKETS</title>
   <style>
     /* White page, black cards - ledger style */
     :root{
@@ -158,13 +158,13 @@
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><rect width="32" height="32" rx="8" fill="#ffffff" stroke="#d4d4d4"/><text x="16" y="23" font-size="17" font-weight="bold" text-anchor="middle" fill="#0a0a0a">*N*</text></svg>
     </div>
     <div class="brandtext">
-      <h1>*NO* LANE MARKETS <span>· limit-order *NO* LANE side only</span></h1>
+      <h1>*NO* LANE MARKETS <span>- limit-order *NO* LANE side only</span></h1>
   <div class="modeswitch">
       <a id="modeDry" class="modebtn" href="/">DRY</a>
       <a id="modeLive" class="modebtn live" href="/live">LIVE</a>
       <a id="allNoBtn" class="modebtn allno" href="/all-no-markets" title="ALL NO MARKETS - NO-side only, maker entries, $250 of its own simulated money">ALL NO</a>
     </div>
-      <div class="sub">Kalshi *NO* LANE contracts · maker (limit) entries · open & closed ledger</div>
+      <div class="sub">Kalshi *NO* LANE contracts - maker (limit) entries - open & closed ledger</div>
     </div>
   </div>
   <a class="back" href="/">&larr; DASHBOARD</a>
@@ -173,22 +173,22 @@
 </header>
 
 <div class="rule">
-Every row below is a *NO* LANE contract entered with a <b>resting limit order</b> at the side's bid — not by crossing the spread. Prices are the <b>limit actually rested</b>.<br>
+Every row below is a *NO* LANE contract entered with a <b>resting limit order</b> at the side's bid - not by crossing the spread. Prices are the <b>limit actually rested</b>.<br>
 <b>Separated from the lanes.</b> This book's money, positions and closed trades are its own: a paper <span class="mono">$250</span> seeded once and never re-funded, and every row tagged <span class="mono">strategy = all_no_markets</span>. The BTC / ETH / XRP / HYPE up/down lanes keep their own clips, tallies and balances and never appear here.<br>
-<b>Sizing: full-Kelly.</b> Clip size follows Kelly Criterion for the modeled edge and price. <b>Read-only</b> — nothing here places, cancels or modifies an order.
+<b>Sizing: full-Kelly.</b> Clip size follows Kelly Criterion for the modeled edge and price. <b>Read-only</b> - nothing here places, cancels or modifies an order.
 </div>
 
 <!-- TALLIES -->
 <div class="tiles" id="tiles">
-  <div class="card tile"><div class="k">Book balance</div><div class="v" id="balance">$250.00</div><div class="s" id="bookSub">paper · seeded once</div></div>
-  <div class="card tile"><div class="k">Deployed</div><div class="v" id="deployed">$0.00</div><div class="s">resting limit × qty</div></div>
+  <div class="card tile"><div class="k">Book balance</div><div class="v" id="balance">$250.00</div><div class="s" id="bookSub">paper - seeded once</div></div>
+  <div class="card tile"><div class="k">Deployed</div><div class="v" id="deployed">$0.00</div><div class="s">resting limit x qty</div></div>
   <div class="card tile"><div class="k">Equity</div><div class="v" id="equity">$250.00</div><div class="s">balance + deployed</div></div>
   <div class="card tile"><div class="k">Book P&L</div><div class="v" id="pnl">$0.00</div><div class="s" id="pnlSub">0 entries</div></div>
   <div class="card tile"><div class="k">Closed trades</div><div class="v" id="closed">0</div><div class="s">lifetime</div></div>
   <div class="card tile"><div class="k">Win rate</div><div class="v" id="winRate">0.0%</div><div class="s" id="winRateSub">0W / 0L</div></div>
   <div class="card tile"><div class="k">Realized P&L</div><div class="v" id="realized">$0.00</div><div class="s" id="realizedSub">net of fees</div></div>
   <div class="card tile"><div class="k">Open positions</div><div class="v" id="openPos">0</div><div class="s" id="openPosSub">0 contracts</div></div>
-  <div class="card tile"><div class="k">Avg entry</div><div class="v" id="avgEntry">—</div><div class="s">across closed trades</div></div>
+  <div class="card tile"><div class="k">Avg entry</div><div class="v" id="avgEntry">-</div><div class="s">across closed trades</div></div>
 </div>
 
 <!-- OPEN POSITIONS -->
@@ -245,17 +245,17 @@ Every row below is a *NO* LANE contract entered with a <b>resting limit order</b
   </div>
 </div>
 
-<footer>*NO* LANE side only · maker (limit) entries · read-only</footer>
+<footer>*NO* LANE side only - maker (limit) entries - read-only</footer>
 
 </div>
 
 <script>
-function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
+function fmtDT(iso){if(!iso)return '-';const d=new Date(iso);if(isNaN(d.getTime()))return String(iso);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());}
 
   function $ (id) { return document.getElementById(id); }
   function formatCurrency(n) { return '$' + n.toFixed(2); }
   function formatPercent(n) { return n.toFixed(1) + '%'; }
-  function formatCent(n) { return (n * 100).toFixed(1) + '¢'; }
+  function formatCent(n) { return (n * 100).toFixed(1) + 'c'; }
   
   async function loadAllNo() {
     try {
@@ -272,7 +272,7 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
       // Populate book tallies
       const book = d.book || { balance: 250, starting: 250, pnl: 0, entries: 0, mode: 'dry' };
       const bs = $('bookSub');
-      if (bs) bs.textContent = (d.book && d.book.mode === 'live') ? 'real Kalshi account · traded live' : 'paper · seeded once';
+      if (bs) bs.textContent = (d.book && d.book.mode === 'live') ? 'real Kalshi account - traded live' : 'paper - seeded once';
       const tally = d.tally || { closed: 0, wins: 0, losses: 0, win_rate: 0, pnl: 0, fees: 0, avg_entry: 0 };
       const openTally = d.open_tally || { positions: 0, contracts: 0, cost: 0, sweet: 0 };
       
@@ -301,7 +301,7 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
       $('openPos').textContent = openTally.positions;
       $('openPosSub').textContent = openTally.contracts + ' contracts';
       
-      $('avgEntry').textContent = tally.avg_entry > 0 ? formatCent(tally.avg_entry) : '—';
+      $('avgEntry').textContent = tally.avg_entry > 0 ? formatCent(tally.avg_entry) : '-';
       
       // Open positions table
       $('openNote').textContent = (openTally.positions || 0) + ' resting';
@@ -309,8 +309,8 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
       if (openRows.length) {
         $('openBody').innerHTML = openRows.map(r => 
           '<tr class="' + (r.entry_price >= 0.84 && r.entry_price <= 0.92 ? 'band' : '') + '">' +
-          '<td class="mono">' + (r.id || '—') + '</td>' +
-          '<td class="mono">' + (r.market_id || '—') + '</td>' +
+          '<td class="mono">' + (r.id || '-') + '</td>' +
+          '<td class="mono">' + (r.market_id || '-') + '</td>' +
           '<td>' + (r.strategy || 'all_no') + '</td>' +
           '<td><span class="badge no">*NO* LANE</span></td>' +
           '<td class="num">' + formatCent(r.entry_price) + '</td>' +
@@ -320,18 +320,18 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
           '<td class="num ' + (r.edge > 0 ? 'up' : (r.edge < 0 ? 'down' : 'flat')) + '">' + 
             (r.edge >= 0 ? '+' : '') + r.edge.toFixed(3) + 'pp</td>' +
           '<td class="num ' + (r.kelly > 0 ? 'up' : 'flat') + '">' + (r.kelly * 100).toFixed(2) + '%</td>' +
-          '<td class="num">' + (r.stop_loss > 0 ? formatCent(r.stop_loss) : '—') + '</td>' +
-          '<td class="num">' + (r.take_profit > 0 ? formatCent(r.take_profit) : '—') + '</td>' +
+          '<td class="num">' + (r.stop_loss > 0 ? formatCent(r.stop_loss) : '-') + '</td>' +
+          '<td class="num">' + (r.take_profit > 0 ? formatCent(r.take_profit) : '-') + '</td>' +
           '<td class="num">' + r.confidence.toFixed(2) + '</td>' +
-          '<td>' + (r.expiration ? r.expiration.split('T')[0] : '—') + '</td>' +
+          '<td>' + (r.expiration ? r.expiration.split('T')[0] : '-') + '</td>' +
           '<td><span class="badge ' + (r.status === 'closing' ? 'closing' : 'open') + '">' + r.status + '</span></td>' +
           '<td><span class="badge ' + (r.mode === 'live' ? 'live' : 'dry') + '">' + r.mode.toUpperCase() + '</span></td>' +
-          '<td class="mono">' + (r.timestamp ? fmtDT(r.timestamp) : '—') + '</td>' +
+          '<td class="mono">' + (r.timestamp ? fmtDT(r.timestamp) : '-') + '</td>' +
           '<td><button class="btn-exit" onclick="promptExit(\'' + r.id + '\', \'' + r.market_id + '\')">EXIT</button></td>' +
           '</tr>'
         ).join('');
       } else {
-        $('openBody').innerHTML = '<tr><td colspan="18" class="empty">No open *NO* LANE positions in this book — the up/down lanes keep their own clips, and this book has not placed one yet.</td></tr>';
+        $('openBody').innerHTML = '<tr><td colspan="18" class="empty">No open *NO* LANE positions in this book - the up/down lanes keep their own clips, and this book has not placed one yet.</td></tr>';
       }
       
       // Closed trades table
@@ -340,8 +340,8 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
       if (closedRows.length) {
         $('closedBody').innerHTML = closedRows.map(r =>
           '<tr>' +
-          '<td class="mono">' + (r.id || '—') + '</td>' +
-          '<td class="mono">' + (r.market_id || '—') + '</td>' +
+          '<td class="mono">' + (r.id || '-') + '</td>' +
+          '<td class="mono">' + (r.market_id || '-') + '</td>' +
           '<td>' + (r.strategy || 'all_no') + '</td>' +
           '<td><span class="badge no">*NO* LANE</span></td>' +
           '<td class="num">' + formatCent(r.entry_price) + '</td>' +
@@ -356,14 +356,14 @@ function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);if(isNaN(d.getTim
           '<td class="num">' + formatCent(r.entry_fair) + '</td>' +
           '<td class="num ' + (r.kelly > 0 ? 'up' : 'flat') + '">' + (r.kelly * 100).toFixed(2) + '%</td>' +
           '<td class="num">' + r.fee_paid.toFixed(3) + '</td>' +
-          '<td>' + (r.exit_reason || '—') + '</td>' +
+          '<td>' + (r.exit_reason || '-') + '</td>' +
           '<td><span class="badge ' + (r.mode === 'live' ? 'live' : 'dry') + '">' + r.mode.toUpperCase() + '</span></td>' +
-          '<td class="mono">' + (r.entry_timestamp ? fmtDT(r.entry_timestamp) : '—') + '</td>' +
-          '<td class="mono">' + (r.exit_timestamp ? fmtDT(r.exit_timestamp) : '—') + '</td>' +
+          '<td class="mono">' + (r.entry_timestamp ? fmtDT(r.entry_timestamp) : '-') + '</td>' +
+          '<td class="mono">' + (r.exit_timestamp ? fmtDT(r.exit_timestamp) : '-') + '</td>' +
           '</tr>'
         ).join('');
       } else {
-        $('closedBody').innerHTML = '<tr><td colspan="18" class="empty">No closed NO trades in this book yet — the up/down lanes keep their own history; this book has not closed one.</td></tr>';
+        $('closedBody').innerHTML = '<tr><td colspan="18" class="empty">No closed NO trades in this book yet - the up/down lanes keep their own history; this book has not closed one.</td></tr>';
       }
       
       // Update NO LANES button state

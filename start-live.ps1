@@ -28,7 +28,7 @@ for ($i=0; $i -lt 10; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 2 -UseBasicParsing
         if ($resp.StatusCode -eq 200) {
-            Write-Host "✅ Server healthy on port $port"
+            Write-Host "[OK] Server healthy on port $port"
             exit 0
         }
     } catch { }

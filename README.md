@@ -219,22 +219,22 @@ This section provides guidance for migrating from the original Node.js implement
 ```
 # Original Node.js structure
 ./
-├── index.html
-├── dashboard.html
-├── all-no-markets.html
-├── server.js
-├── package.json
-└── ...
+|-- index.html
+|-- dashboard.html
+|-- all-no-markets.html
+|-- server.js
+|-- package.json
+|-- ...
 
 # New Python structure
 ./
-├── app.py                    # Main application
-├── templates/              # HTML templates (if using)
-├── static/                 # Static assets
-├── trading_state.json       # Application state
-├── trading_data.db          # Database
-├── README.md                # Documentation
-└── requirements.txt        # Dependencies
+|-- app.py                    # Main application
+|-- templates/              # HTML templates (if using)
+|-- static/                 # Static assets
+|-- trading_state.json       # Application state
+|-- trading_data.db          # Database
+|-- README.md                # Documentation
+|-- requirements.txt        # Dependencies
 ```
 
 #### API Endpoints
