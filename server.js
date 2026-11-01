@@ -1900,7 +1900,10 @@ async function getAllTradableSeries() {
     }
     const lanesSeries = Array.from(new Set(LANES.flatMap(l => l.seriesList || []).filter(Boolean)));
     const ranked = Array.from(bySeries.entries()).map(([s, r]) => ({ s, oi: r.oi })).sort((a, b) => b.oi - a.oi).map(x => x.s);
-    return Array.from(new Set([...lanesSeries, ...ranked])).slice(0, 30);
+    // COMBAT: series discovered by kind (handles rotated/delayed 1-hour ids)
+    // always make the scan list, even before they rank by open interest.
+    const kindSeries = Object.values(series_kind.cache).map(c => c && c.series).filter(Boolean);
+    return Array.from(new Set([...lanesSeries, ...kindSeries, ...ranked])).slice(0, 30);
   } catch (e) {
     // Fallback to LANES series
     return Array.from(new Set(LANES.flatMap(l => l.seriesList || []).filter(Boolean)));

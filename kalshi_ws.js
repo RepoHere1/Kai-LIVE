@@ -25,13 +25,28 @@ class KalshiWS {
     }
 
     try {
-      const wsUrl = 'wss://external-api.kalshi.com/trade-api/ws/v2';
-      this.ws = new WebSocket(wsUrl);
+      // Same host the REST client uses. Kalshi authenticates the WS at the
+      // HTTP upgrade via KALSHI-ACCESS-* headers (same scheme as REST);
+      // a bare handshake is rejected with 401 and used to 1006-loop forever.
+      const wsUrl = 'wss://api.elections.kalshi.com/trade-api/ws/v2';
+      const acct = this.accounts.live;
+      const ts = Math.floor(Date.now() / 1000).toString();
+      const sig = require('crypto').sign('sha256',
+        Buffer.from(ts + 'GET/trade-api/ws/v2'),
+        { key: acct.pem, padding: require('crypto').constants.RSA_PKCS1_PSS_PADDING, saltLength: require('crypto').constants.RSA_PSS_SALTLEN_DIGEST }
+      ).toString('base64');
+      this.ws = new WebSocket(wsUrl, {
+        headers: {
+          'KALSHI-ACCESS-KEY': acct.keyId,
+          'KALSHI-ACCESS-SIGNATURE': sig,
+          'KALSHI-ACCESS-TIMESTAMP': ts
+        }
+      });
 
       this.ws.onopen = () => {
-        console.log('[KalshiWS] Connected');
+        console.log('[KalshiWS] Connected (header-authenticated)');
         this.connected = true;
-        this.authenticate();
+        this.authenticated = true; // auth rode the handshake
         this.startHeartbeat();
         this.resubscribe();
       };
@@ -124,11 +139,14 @@ class KalshiWS {
 
   scheduleReconnect() {
     if (this.reconnectTimer) return;
+    // Exponential backoff: 5s doubling to a 60s cap, reset after a clean auth.
+    const delay = this.reconnectDelayMs || 5000;
+    this.reconnectDelayMs = Math.min(60000, delay * 2);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       console.log('[KalshiWS] Reconnecting...');
       this.connect();
-    }, 5000);
+    }, delay);
   }
 
   resubscribe() {
@@ -175,6 +193,7 @@ class KalshiWS {
       case 'auth':
         if (msg.success) {
           this.authenticated = true;
+          this.reconnectDelayMs = 5000; // healthy session: reset backoff
           console.log('[KalshiWS] Authenticated');
           this.resubscribe();
         } else {
