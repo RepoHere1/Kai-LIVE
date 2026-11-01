@@ -9,6 +9,7 @@ Write-Host "==== KAI TAPE - LIVE book (events + 5-min pulse, Ctrl+C to stop) ===
 $knownClosed = @{}   # trade id -> $true
 $knownOpen = @{}     # position id -> $true
 $knownRT = @{}       # lane trade composite key -> $true (recent-trades feed)
+$lastPulseSig = ''   # last pulse state signature (suppress identical pulses)
 $lastBal = $null; $lastPnl = $null; $lastUptime = $null; $lastPulse = 0
 
 function J([string]$u) {
@@ -77,12 +78,14 @@ while ($true) {
   }
 
   $nowSec = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  if ($nowSec - $lastPulse -ge 300) {
+  $stateSig = "$([Math]::Round($lastBal,2))|$([Math]::Round($lastPnl,2))|$(if ($nb) { @($nb.open_rows).Count } else { '?' })|$(if ($nb) { $nb.book.entries } else { '?' })"
+  if ($nowSec - $lastPulse -ge 300 -and ($stateSig -ne $lastPulseSig -or $nowSec - $lastPulse -ge 3600)) {
     $lastPulse = $nowSec
+    $lastPulseSig = $stateSig
     $st = J "http://127.0.0.1:$($Cfg.Port)/api/strategies"
     $lanesOn = 0
     if ($st) { foreach ($p in $st.PSObject.Properties) { if ($p.Value.running) { $lanesOn++ } } }
-    Line 'DarkCyan' ("PULSE alive | bal `${0} pnl `${1} open {2} entries {3} | lanes {4} on | uptime {5}m" -f [Math]::Round($lastBal,2), [Math]::Round($lastPnl,2), (@($nb.open_rows).Count), $nb.book.entries, $lanesOn, [int]($lastUptime/60))
+    Line 'DarkCyan' ("PULSE alive | bal `${0} pnl `${1} open {2} entries {3} | lanes {4} on | uptime {5}m" -f [Math]::Round($lastBal,2), [Math]::Round($lastPnl,2), ($(if ($nb) { @($nb.open_rows).Count } else { '?' })), $(if ($nb) { $nb.book.entries } else { '?' }), $lanesOn, [int]($lastUptime/60))
   }
 
   Start-Sleep -Seconds 5
