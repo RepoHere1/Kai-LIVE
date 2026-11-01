@@ -8,6 +8,7 @@ Write-Host "==== KAI TAPE - LIVE book (events + 5-min pulse, Ctrl+C to stop) ===
 
 $knownClosed = @{}   # trade id -> $true
 $knownOpen = @{}     # position id -> $true
+$knownRT = @{}       # lane trade composite key -> $true (recent-trades feed)
 $lastBal = $null; $lastPnl = $null; $lastUptime = $null; $lastPulse = 0
 
 function J([string]$u) {
@@ -48,6 +49,21 @@ while ($true) {
       Line 'Cyan' ("BAL `${0} -> `${1}  (pnl `${2})" -f [Math]::Round($lastBal,2), [Math]::Round($bal,2), [Math]::Round($pnl,2))
     }
     $lastBal = $bal; $lastPnl = $pnl
+  }
+
+  $rt = J "http://127.0.0.1:$($Cfg.Port)/api/recent-trades"
+  if ($rt -and $rt.trades) {
+    foreach ($t in @($rt.trades)) {
+      $key = "$($t.market_id)|$($t.exit_timestamp)|$($t.entry_price)|$($t.pnl)"
+      if (-not $knownRT[$key]) {
+        $knownRT[$key] = $true
+        if ($t.strategy -ne 'all_no_markets') {
+          $col = if ([double]$t.pnl -gt 0) { 'Green' } else { 'Red' }
+          Line $col ("LANE CLOSE [{0}] {1} {2} in={3} out={4} pnl={5} [{6}]" -f $t.strategy, $t.market_id, $t.side, $t.entry_price, $t.exit_price, $t.pnl, $t.exit_reason)
+        }
+      }
+    }
+    if ($knownRT.Count -gt 400) { $knownRT.Clear(); foreach ($t in @($rt.trades)) { $knownRT["$($t.market_id)|$($t.exit_timestamp)|$($t.entry_price)|$($t.pnl)"] = $true } }
   }
 
   $h = J "http://127.0.0.1:$($Cfg.Port)/api/health"
