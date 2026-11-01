@@ -73,7 +73,10 @@ function fairValues(spotPrice, strike, tauSec, sigma, volWindow) {
   mu = Math.max(-sigRootTau, Math.min(sigRootTau, mu)); // cap at 1 sigma
 
   const z = (Math.log(spotPrice / strike) + mu) / sigRootTau;
-  const fairYes = normCdf(z);
+  // Confidence cap: a model fair of 0.87+ on a 15-minute crypto contract is
+  // overconfidence (spot gaps through strikes); cap at 0.88 so sizing and
+  // stacking never bet the ranch on "near-certainty".
+  const fairYes = Math.min(0.88, Math.max(0.12, normCdf(z)));
   return { fairYes, fairNo: 1 - fairYes, z, sigma, mu };
 }
 

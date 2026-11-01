@@ -35,6 +35,7 @@ const kalshi = require('./kalshi');
 const kilo = require('./kilo');
 const brain = require('./brain_live');
 const series_kind = require('./series_kind');
+const conviction = require('./conviction');
 const quote_stream = require('./quote_stream');
 const { KalshiWS } = require('./kalshi_ws');
 const { CoinbaseWS } = require('./coinbase_ws');
@@ -1361,11 +1362,12 @@ async function markLivePositions() {
       const lifePct = totalLifeMs > 0 ? heldMs / totalLifeMs : 1;
       if (lifePct > 0.8 && bid != null && bid <= pos.entry_price) { await LO.exitPosition(pos, bid, 'time_decay'); continue; }
 
-      // Trailing stop: lock half the gain once the mark has moved our way
-      // by at least max(2c, half the entry edge) above entry.
-      const trailArmed = (pos.hwm != null ? pos.hwm : pos.entry_price) >= pos.entry_price + Math.max(0.02, 0.5 * (pos.edge_at_entry || 0));
+      // Trailing stop: arm only after a real move (max(4c, full edge)) and
+      // then give back only a QUARTER of the peak gain. The old 50% lock cut
+      // winners at 0.57 that were ridden toward settlement.
+      const trailArmed = (pos.hwm != null ? pos.hwm : pos.entry_price) >= pos.entry_price + Math.max(0.04, (pos.edge_at_entry || 0));
       if (trailArmed && bid != null) {
-        const trailStop = pos.entry_price + ((pos.hwm != null ? pos.hwm : bid) - pos.entry_price) * 0.5;
+        const trailStop = pos.entry_price + ((pos.hwm != null ? pos.hwm : bid) - pos.entry_price) * 0.75;
         if (bid <= trailStop) { await LO.exitPosition(pos, bid, 'trail_stop'); continue; }
       }
 
@@ -2789,7 +2791,20 @@ async function runAllNoLive() {
     const minFair = cfg.min_fair || 0.65;
     const maxNoPx = cfg.max_no_price || 0.32;
     if (r.fair < minFair || r.limit_entry > maxNoPx) continue;
-    if (busy.has(r.market_id)) continue;
+    // CONVICTION PRESS: one position per market unless the settled-trade
+    // record for this (asset, price bucket) is verified >=80% wins - then a
+    // second add is earned from facts, not brain confidence.
+    const press = conviction.pressLevel(
+      conviction.grade((state.live.closed || []).concat(state.all_no.live && state.all_no.live.closed_trades || [])),
+      r.market_id, r.limit_entry
+    );
+    const sameMarket = state.live.positions.filter(p => p.market_id === r.market_id && p.qty > 0).length
+      + (state.live.orders || []).filter(o => o.market_id === r.market_id && o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling')).length;
+    if (sameMarket >= (press.level >= 2 ? 2 : 1)) continue;
+    if (press.level > 1) {
+      log('conviction_press', { market_id: r.market_id, level: press.level, n: press.n, win_rate: Number((press.winRate || 0).toFixed(3)) });
+    }
+    if (busy.has(r.market_id) && sameMarket > 0) continue;
     const lastTry = state.runtime.all_no._last_try || (state.runtime.all_no._last_try = {});
     if (lastTry[r.market_id] && Date.now() - lastTry[r.market_id] < 90000) continue;
     lastTry[r.market_id] = Date.now();
@@ -2798,7 +2813,11 @@ async function runAllNoLive() {
     const lane = { name: 'all_no_markets', horizon: 'no-side', spot: r.spot_product || null };
     // Post at the LIVE stream NO bid, not the scan-time bid: the scan quote is stale by the
     // time the order posts, which caused most orders to be rejected as 'post only cross'.
-    const entryPx = q.no_bid != null ? q.no_bid : r.limit_entry;
+    // CAP ENFORCED ON THE LIVE BID TOO: the live bid can be far above the scan
+    // bid (0.47/0.53 fills happened); never chase above maxNoPx.
+    if (q.no_bid == null || q.no_bid > maxNoPx) continue;
+    const entryPx = q.no_bid;
+    log('all_no_post', { market_id: r.market_id, live_bid: q.no_bid, px: entryPx, cap: maxNoPx, fair: r.fair, edge: r.edge });
     const rec = await LO.openEntry(lane, q, 'NO', entryPx, r.fair, r.edge, null);
     if (rec) busy.add(r.market_id);
     const openNow = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0).length;
@@ -2871,6 +2890,9 @@ async function boot() {
   // OPERATOR_LAW: Assert no supervisor exists or can be spawned.
   OPERATOR_LAW.assertNoSupervisor();
   OPERATOR_LAW.enforce('boot', { action: 'server_start', mode: 'live' });
+  // Real boot time (the persisted booted_at used to leak across restarts and
+  // show fake 50-hour uptimes in /api/health).
+  state.booted_at = new Date().toISOString();
   const bootCash = await liveCash();
   log('boot', { mode: 'live', live_balance: bootCash, kalshi_live: kalshi.LIVE_BASE });
 

@@ -313,6 +313,17 @@ function pendingExposure() {
     let pos = s.live.positions.find((p) => p.order_id === rec.order_id);
     if (!pos) {
       const entry = costTotal / totalFilled;
+      // ENTRY AUDIT: a real fill cost of $0.47/contract appeared on an order
+      // posted at $0.31 (cap 0.32). If the booked entry disagrees with the
+      // posted limit price, dump the facts so the leaking path is caught.
+      if (Math.abs(entry - rec.price) > 0.02) {
+        log('live_entry_mismatch', {
+          lane: rec.lane, ticker: rec.ticker, side: rec.side,
+          posted_px: rec.price, filled_avg: Number(entry.toFixed(4)),
+          totalFilled, costDollars: costDollars != null ? costDollars : null,
+          order_id: rec.order_id,
+        });
+      }
       pos = {
         id: 'pos-' + String(rec.order_id).slice(0, 8),
         order_id: rec.order_id,
