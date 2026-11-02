@@ -2290,9 +2290,10 @@ async function handle(req, res) {
   }
   if (p === '/api/no-lanes') return json(res, { no_lanes_enabled: !!state.no_lanes_enabled });
   if (p === '/api/no-lanes/book') {
-    // Return ALL NO book: positions, trades, and tallies
+    // Return ALL NO book: positions, trades, and tallies + real account cash so
+    // the tape/dashboards see EXTERNAL moves (direct Kalshi trades, deposits).
     const bookData = getAllNoBook();
-    return json(res, Object.assign(bookData, { generated_at: new Date().toISOString() }));
+    return json(res, Object.assign(bookData, { generated_at: new Date().toISOString(), acct: { cash: LO.cash(), stale: LO.cash() == null } }));
   }
   
   if (p === '/api/no-lanes/entry' && method === 'POST') {
@@ -2999,6 +3000,21 @@ async function boot() {
   LO.start();
   LIVE_STREAM.start();
   // Account state is streamed (LIVE_STREAM); the balance re-reads on fills, not on a timer.
+  // EXCEPT this watcher: every 30s it re-reads the real Kalshi balance over REST so
+  // EXTERNAL moves (direct trades on kalshi.com, deposits, withdrawals, manual
+  // settlements) are caught even while the bot is idle. On a move it logs acct_move
+  // and syncs the ALL NO book so /api/no-lanes/book tells the whole truth.
+  setInterval(async () => {
+    try {
+      const before = LO.cash();
+      await LO.refreshSnapshot();
+      const after = LO.cash();
+      if (after != null && before != null && Math.abs(after - before) >= 0.01) {
+        log('acct_move', { from: Number(before.toFixed(2)), to: Number(after.toFixed(2)), delta: Number((after - before).toFixed(2)) });
+        syncAllNoView();
+      }
+    } catch (e) { /* best-effort watcher */ }
+  }, 30000);
 
   // Keep every lane's series quoted even when no lane is running, so the
   // provenance block on the page always names a dry host and a fresh quote.

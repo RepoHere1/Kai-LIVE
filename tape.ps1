@@ -10,6 +10,7 @@ $knownClosed = @{}   # trade id -> $true
 $knownOpen = @{}     # position id -> $true
 $knownRT = @{}       # lane trade composite key -> $true (recent-trades feed)
 $lastPulseSig = ''   # last pulse state signature (suppress identical pulses)
+$lastAcct = $null    # real Kalshi account cash (catches DIRECT trades/deposits)
 $lastBal = $null; $lastPnl = $null; $lastUptime = $null; $lastPulse = 0
 
 function J([string]$u) {
@@ -26,6 +27,7 @@ if ($seed) {
   foreach ($t in @($seed.closed_rows)) { $knownClosed[$t.id] = $true }
   foreach ($p in @($seed.open_rows)) { $knownOpen[$p.id] = $true }
   $lastBal = [double]$seed.book.balance; $lastPnl = [double]$seed.book.pnl
+  if ($seed.acct -and $seed.acct.cash -ne $null) { $lastAcct = [double]$seed.acct.cash }
 }
 
 while ($true) {
@@ -50,6 +52,18 @@ while ($true) {
       Line 'Cyan' ("BAL `${0} -> `${1}  (pnl `${2})" -f [Math]::Round($lastBal,2), [Math]::Round($bal,2), [Math]::Round($pnl,2))
     }
     $lastBal = $bal; $lastPnl = $pnl
+
+    # Real Kalshi account cash: moves here mean something happened OUTSIDE the bot
+    # (direct trade on kalshi.com, deposit, withdrawal, manual settlement).
+    if ($nb.acct -and $nb.acct.cash -ne $null) {
+      $acct = [double]$nb.acct.cash
+      if ($lastAcct -ne $null -and [Math]::Abs($acct - $lastAcct) -ge 0.01) {
+        $d = $acct - $lastAcct
+        $sign = if ($d -ge 0) { '+' } else { '' }
+        Line 'Magenta' ("ACCT `${0} (${1}`${2}) EXTERNAL move - direct trade/deposit/settle detected" -f [Math]::Round($acct,2), $sign, [Math]::Round($d,2))
+      }
+      $lastAcct = $acct
+    }
   }
 
   $rt = J "http://127.0.0.1:$($Cfg.Port)/api/recent-trades"
@@ -85,7 +99,7 @@ while ($true) {
     $st = J "http://127.0.0.1:$($Cfg.Port)/api/strategies"
     $lanesOn = 0
     if ($st) { foreach ($p in $st.PSObject.Properties) { if ($p.Value.running) { $lanesOn++ } } }
-    Line 'DarkCyan' ("PULSE alive | bal `${0} pnl `${1} open {2} entries {3} | lanes {4} on | uptime {5}m" -f [Math]::Round($lastBal,2), [Math]::Round($lastPnl,2), ($(if ($nb) { @($nb.open_rows).Count } else { '?' })), $(if ($nb) { $nb.book.entries } else { '?' }), $lanesOn, [int]($lastUptime/60))
+    Line 'DarkCyan' ("PULSE alive | bal `${0} pnl `${1} open {2} entries {3} | acct `${4} | lanes {5} on | uptime {6}m" -f [Math]::Round($lastBal,2), [Math]::Round($lastPnl,2), ($(if ($nb) { @($nb.open_rows).Count } else { '?' })), $(if ($nb) { $nb.book.entries } else { '?' }), ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60))
   }
 
   Start-Sleep -Seconds 5
