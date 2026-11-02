@@ -278,3 +278,47 @@ cd C:\Users\darri\Kai-LIVE
 ---
 
 **This file = your recovery point. Everything in [OK] is done. Everything in * is next. No guessing needed.**
+
+---
+
+## 2026-11-02 EXIT + ENTRY SETTINGS DECISION (evidence-based, LIVE only)
+
+**Method:** all closed trades in `state.json` were re-scored against Kalshi's
+PUBLISHED settlement result (public market endpoint, cached). "hold_pnl" = what
+the trade would have paid held to settlement (fee adj). This separates ENTRY
+quality from EXIT behavior.
+
+**Exit changes (code - persisted in git):**
+- TRAIL STOP OFF on every lane (`runtime.trail_stop=false`, default in
+  `defaultState`, gate in `markLivePositions`). Evidence: 15 trail exits won
+  86.7% at settlement; holding = +$29.82 more. Commit 63bea0b.
+- HARD STOP-LOSS stays ON (operator decision). Aggregate hold-vs-realized on
+  stopped trades was only about +$8 - near neutral, kept as loss cap.
+
+**Entry band change (RUNTIME config via POST /api/config - lives in
+`state.json`, NOT in git; re-apply if the state file is ever deleted):**
+`runtime.all_no` = { min_entry_price: 0.45, max_no_price: 0.65,
+max_yes_price: 0.65, brain_max_price: 0.65, max_concurrent: 4 } (other gates
+unchanged: min_fair 0.58, min_edge 0.015, max_edge 0.18, spread .005-.08,
+tau 40-2100, allow_yes true, brain_mode true).
+
+Evidence (settled LIVE trades, side x entry price, win% vs breakeven):
+- .30-.45 band: NO n=16 win 18.8% vs be 38.9 (-$41.55 hold) - THE BLEEDER.
+  Pre-change caps (max_no/max_yes 0.42, min 0.15) pointed straight at it.
+- .45-.55: NO n=25 win 64.0 vs be 50.9 (+14.69); YES n=3 win 66.7 (+3.33)
+- .55-.65: NO n=19 win 73.7 vs be 57.9 (+25.17); YES n=6 win 66.7 (+8.60)
+- .15-.30: only positive via lottery-settling outliers; banned by the floor.
+Proven profitable band = 0.45-0.65 either side. Old posts at px 0.36/0.41
+(cap 0.42) now rejected; first post-cap order went out at 0.56 cap 0.65.
+
+**BUG FIXED IN CONFIG:** LIVE `all_no.max_concurrent` was missing ->
+`count >= undefined` is false -> the concurrent-position gate NEVER FIRED on
+LIVE. Now 4.
+
+**DIVERGENCE POLICY:** DRY/Mirror (the lab) intentionally keeps loose gates
+(no floor, caps 0.42). Do NOT sync this band into Mirror - it generates the
+stats that let this call be re-verified.
+
+**Monitoring gaps noticed (not fixed):** in live mode the all_no lane
+heartbeat/last_skip are only written by the DRY code path (stale ages shown on
+/api/strategies); lanes skip last_tick when they have no quotable market.
