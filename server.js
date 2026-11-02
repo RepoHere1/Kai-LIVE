@@ -810,6 +810,9 @@ function loadState() {
   } catch (e) { return defaultState(); }
 }
 let state = loadState();
+// BOOT COUNTER: every process start bumps this; the tape PULSE prints it so
+// silent watchdog restart loops become visible.
+state.boot_count = (state.boot_count || 0) + 1;
 // LIVE order lifecycle against the real Kalshi account (see live_orders.js).
 const LIVE_STREAM = new (require('./kalshi_stream').AccountStream)({
   log: (kind, obj) => log(kind, obj),
@@ -1063,10 +1066,13 @@ async function activeQuote(lane) {
       pick = fairMarkets.slice().sort((a, b) => new Date(a.close_time) - new Date(b.close_time))[0];
     }
     
-    // Create synthetic quote if needed
-    const synth = syntheticQuote(pick, pick.fair);
+    // Merge the live WS quote overlay into the pick. REST listings carry no
+    // bid/ask; the old syntheticQuote refused them, which froze this lane and
+    // the brain pass for 78k passes ("no coherent open market").
+    const q2 = quote_stream.apply(Object.assign({}, pick));
+    const realBook = q2.yes_ask != null && q2.no_ask != null && q2.yes_bid != null && q2.no_bid != null;
     return { 
-      quote: synth, 
+      quote: realBook ? q2 : null, 
       series, 
       source: res.source, 
       host: res.host, 
@@ -1789,10 +1795,14 @@ function getAllNoBook() {
       sweet: open_sweet,
     },
     no_lanes_enabled: state.no_lanes_enabled,
+    boots: state.boot_count || 0,
   };
 }
 
 async function noBook() {
+  // DIVERGENCE POLICY: LIVE is the product - tight gates (cluster=1, price
+  // floor 0.15, HYPE retired). Mirror is the lab - looser gates on purpose to
+  // generate statistics. Do NOT sync LIVE tightenings back into Mirror.
   // Return available NO-side market recommendations for potential entries
   // Scans ALL Kalshi series, not just DRY/LIVE lanes - open to ANY prediction market
   const rows = [];
@@ -1839,11 +1849,29 @@ async function noBook() {
         if (bid == null || askPx == null) return;
         const sideSpread = askPx - bid;
         if (sideSpread > 0.06) return; // per-side thin line
-        if (fairSide < anCfg.min_fair) return;              // probability floor
+        // FAT-TAIL MARGIN: HYPE's jumps crush a smooth gaussian model. Demand
+        // more probability margin there (evidence: its biggest losses both ways).
+        const fairFloor = asset === 'HYPE-USD' ? Math.max(anCfg.min_fair, 0.58) : anCfg.min_fair;
+        if (fairSide < fairFloor) return;                   // probability floor
         if (bid > cap) return;                              // price cap (cheap only)
         if (bid < (anCfg.min_entry_price || 0)) return;     // no sub-floor lottery tickets
+        // MOMENTUM CONFIRMATION: the gaussian model knows only distance from
+        // strike. Winners entered while the move AWAY from the strike was
+        // continuing; losers were reversals. Block entries when spot is
+        // driving back toward the strike faster than half a 60s sigma.
+        const pts = (sp && Array.isArray(sp.points)) ? sp.points : [];
+        if (pts.length >= 31 && perSec) {
+          const mom = (sp.price - pts[pts.length - 31].p) / pts[pts.length - 31].p;
+          const drift60 = 0.5 * perSec * Math.sqrt(60);
+          if (side === 'NO' && mom > drift60) return;   // spot rising toward strike
+          if (side === 'YES' && mom < -drift60) return; // spot falling toward strike
+        }
         const e = fairSide - bid;                           // REAL maker edge
         if (e < anCfg.min_edge) return;
+        // TOO-GOOD FILTER: an edge > max_edge means the MODEL is wrong, not
+        // that the market is giving money away (evidence: fair 0.509 at 0.29
+        // stopped out; every deep LIVE loss claimed 16-22c "edge").
+        if (e > (anCfg.max_edge != null ? anCfg.max_edge : 0.18)) return;
         const kelly = Math.max(0, e / (1 - bid));
         const kellyCapped = Math.min(0.25, kelly);          // cap at 25% Kelly
         const q2 = Math.max(1, Math.floor(5 * kellyCapped / Math.max(0.01, bid)));
@@ -2066,7 +2094,7 @@ async function postAllNoOrder(position, action, exit_price) {
 function log(kind, obj) {
   const line = { at: new Date().toISOString(), kind, ...obj };
   state.logs.unshift(JSON.stringify(line));
-  if (state.logs.length > 400) state.logs.pop();
+  if (state.logs.length > 2000) state.logs.pop();
   noteProvenance({ kind, ...obj, at: line.at });
   save();
 }
@@ -2762,6 +2790,10 @@ async function runAllNoBrainPass() {
   pending.forEach(o => busy.add(o.ticker));
 
   for (const c of BRAIN_COINS) {
+    // HYPE RETIRED ON LIVE: fat tails vs the smooth gaussian model produced
+    // the biggest losses both ways at this account size. Evidence collection
+    // continues on Mirror (the lab). Re-enable at runtime: all_no.brain_hype=true.
+    if (c.asset === 'HYPE-USD' && cfg.brain_hype !== true) continue;
     const s = spot[c.asset];
     if (!s || !Number.isFinite(s.price)) continue;
     // COMBAT: kind discovery rides along (rotated 15m series ids)
@@ -2796,6 +2828,19 @@ async function runAllNoBrainPass() {
       const side = result.side;
       const price = side === 'YES' ? q.yes_bid : q.no_bid;
       if (price == null) continue;
+      // TOO-GOOD FILTER (same as the deep scanner): every brain loss claimed
+      // 0.22-0.59 "edge" - that is model error, not free money.
+      if (result.edge > (cfg.max_edge != null ? cfg.max_edge : 0.18)) continue;
+      // MOMENTUM CONFIRMATION: block entries driving back toward the strike.
+      {
+        const pts = Array.isArray(s.points) ? s.points : [];
+        if (pts.length >= 31 && perSec) {
+          const mom = (s.price - pts[pts.length - 31].p) / pts[pts.length - 31].p;
+          const drift60 = 0.5 * perSec * Math.sqrt(60);
+          if (side === 'NO' && mom > drift60) continue;
+          if (side === 'YES' && mom < -drift60) continue;
+        }
+      }
       // Coin-flip zone: never chase expensive contracts.
       const maxPrice = cfg.brain_max_price != null ? cfg.brain_max_price : 0.60;
       const minPrice = state.runtime.min_price ?? 0.05;
@@ -2901,10 +2946,10 @@ async function runAllNoLive() {
     const sameMarket = state.live.positions.filter(p => p.market_id === r.market_id && p.qty > 0).length
       + (state.live.orders || []).filter(o => o.market_id === r.market_id && o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling')).length;
     if (sameMarket >= (press.level >= 2 ? 2 : 1)) continue;
-    // CLUSTER CAP: correlated same-round entries die together. At most 2
-    // positions share one contract round (close time).
+    // CLUSTER CAP: correlated same-round entries die together (evidence: BTC
+    // + HYPE stopped out in the same round twice). LIVE: ONE position per round.
     const sameRound = state.live.positions.filter(p => p.qty > 0 && p.strategy === 'all_no_markets' && p.close_time && r.expiration && Math.abs(new Date(p.close_time).getTime() - new Date(r.expiration).getTime()) < 1000).length;
-    if (sameRound >= 2) continue;
+    if (sameRound >= 1) continue;
     if (press.level > 1) {
       log('conviction_press', { market_id: r.market_id, level: press.level, n: press.n, win_rate: Number((press.winRate || 0).toFixed(3)) });
     }
@@ -3103,21 +3148,28 @@ async function boot() {
   LO.start();
   LIVE_STREAM.start();
   // Account state is streamed (LIVE_STREAM); the balance re-reads on fills, not on a timer.
-  // EXCEPT this watcher: every 30s it re-reads the real Kalshi balance over REST so
+  // EXCEPT this watcher: every 60s it re-reads the real Kalshi balance over REST so
   // EXTERNAL moves (direct trades on kalshi.com, deposits, withdrawals, manual
   // settlements) are caught even while the bot is idle. On a move it logs acct_move
   // and syncs the ALL NO book so /api/no-lanes/book tells the whole truth.
+  // 429 BACKOFF: hammering /portfolio/balance rate-limits the account and makes
+  // openEntry refuse to size ("live cash unavailable"). If the read goes stale,
+  // stop forcing polls for 3 minutes and let the engine's own retry win.
+  let acctWatchBackoffUntil = 0;
   setInterval(async () => {
     try {
+      if (Date.now() < acctWatchBackoffUntil) return;
       const before = LO.cash();
       await LO.refreshSnapshot();
+      const snap = LO.snapshot();
+      if (snap.balance_stale) { acctWatchBackoffUntil = Date.now() + 3 * 60 * 1000; return; }
       const after = LO.cash();
       if (after != null && before != null && Math.abs(after - before) >= 0.01) {
         log('acct_move', { from: Number(before.toFixed(2)), to: Number(after.toFixed(2)), delta: Number((after - before).toFixed(2)) });
         syncAllNoView();
       }
-    } catch (e) { /* best-effort watcher */ }
-  }, 30000);
+    } catch (e) { acctWatchBackoffUntil = Date.now() + 3 * 60 * 1000; }
+  }, 60000);
 
   // Keep every lane's series quoted even when no lane is running, so the
   // provenance block on the page always names a dry host and a fresh quote.

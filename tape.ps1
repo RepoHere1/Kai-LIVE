@@ -2,6 +2,7 @@
 # happens: entries, closes, balance moves, server restarts. A PULSE line
 # every 5 minutes proves the heart is beating. Run:  .\tape.ps1
 $ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'   # kills the blue "Reading web response" popup
 $Cfg = @{ Tag = 'LIVE'; Port = 8788 }
 
 Write-Host "==== KAI TAPE - LIVE book (events + 5-min pulse, Ctrl+C to stop) ====" -ForegroundColor White
@@ -11,6 +12,8 @@ $knownOpen = @{}     # position id -> $true
 $knownRT = @{}       # lane trade composite key -> $true (recent-trades feed)
 $lastPulseSig = ''   # last pulse state signature (suppress identical pulses)
 $lastAcct = $null    # real Kalshi account cash (catches DIRECT trades/deposits)
+$lastLanePnl = $null # lane book aggregate pnl (from /api/recent-trades total_pnl)
+$lastLaneCount = 0   # lane book total closed trades
 $lastBal = $null; $lastPnl = $null; $lastUptime = $null; $lastPulse = 0
 
 function J([string]$u) {
@@ -28,6 +31,12 @@ if ($seed) {
   foreach ($p in @($seed.open_rows)) { $knownOpen[$p.id] = $true }
   $lastBal = [double]$seed.book.balance; $lastPnl = [double]$seed.book.pnl
   if ($seed.acct -and $seed.acct.cash -ne $null) { $lastAcct = [double]$seed.acct.cash }
+}
+$seedRT = J "http://127.0.0.1:$($Cfg.Port)/api/recent-trades?per_page=200"
+if ($seedRT -and $seedRT.trades) {
+  foreach ($t in @($seedRT.trades)) { $knownRT["$($t.market_id)|$($t.exit_timestamp)|$($t.entry_price)|$($t.pnl)"] = $true }
+  if ($seedRT.total_pnl -ne $null) { $lastLanePnl = [double]$seedRT.total_pnl }
+  $lastLaneCount = [int]$seedRT.total
 }
 
 while ($true) {
@@ -66,7 +75,7 @@ while ($true) {
     }
   }
 
-  $rt = J "http://127.0.0.1:$($Cfg.Port)/api/recent-trades"
+  $rt = J "http://127.0.0.1:$($Cfg.Port)/api/recent-trades?per_page=200"
   if ($rt -and $rt.trades) {
     foreach ($t in @($rt.trades)) {
       $key = "$($t.market_id)|$($t.exit_timestamp)|$($t.entry_price)|$($t.pnl)"
@@ -78,6 +87,8 @@ while ($true) {
         }
       }
     }
+    if ($rt.total_pnl -ne $null) { $lastLanePnl = [double]$rt.total_pnl }
+    $lastLaneCount = [int]$rt.total
     if ($knownRT.Count -gt 400) { $knownRT.Clear(); foreach ($t in @($rt.trades)) { $knownRT["$($t.market_id)|$($t.exit_timestamp)|$($t.entry_price)|$($t.pnl)"] = $true } }
   }
 
@@ -92,14 +103,16 @@ while ($true) {
   }
 
   $nowSec = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  $stateSig = "$([Math]::Round($lastBal,2))|$([Math]::Round($lastPnl,2))|$(if ($nb) { @($nb.open_rows).Count } else { '?' })|$(if ($nb) { $nb.book.entries } else { '?' })"
+  $boots = if ($nb) { $nb.boots } else { '?' }
+  $stateSig = "$([Math]::Round($lastBal,2))|$([Math]::Round($lastPnl,2))|$lastLanePnl|$lastLaneCount|$(if ($nb) { @($nb.open_rows).Count } else { '?' })|$(if ($nb) { $nb.book.entries } else { '?' })|$boots"
   if ($nowSec - $lastPulse -ge 300 -and ($stateSig -ne $lastPulseSig -or $nowSec - $lastPulse -ge 3600)) {
     $lastPulse = $nowSec
     $lastPulseSig = $stateSig
     $st = J "http://127.0.0.1:$($Cfg.Port)/api/strategies"
     $lanesOn = 0
     if ($st) { foreach ($p in $st.PSObject.Properties) { if ($p.Value.running) { $lanesOn++ } } }
-    Line 'DarkCyan' ("PULSE alive | bal `${0} pnl `${1} open {2} entries {3} | acct `${4} | lanes {5} on | uptime {6}m" -f [Math]::Round($lastBal,2), [Math]::Round($lastPnl,2), ($(if ($nb) { @($nb.open_rows).Count } else { '?' })), $(if ($nb) { $nb.book.entries } else { '?' }), ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60))
+    $totPnl = [Math]::Round($lastPnl + $lastLanePnl, 2)
+    Line 'DarkCyan' ("PULSE alive | bal `${0} | all_no `${1} (n={2}) | lanes `${3} (n={4}) | TOTAL `${5} | acct `${6} | lanes {7} on | uptime {8}m | boots {9}" -f [Math]::Round($lastBal,2), [Math]::Round($lastPnl,2), ($(if ($nb) { $nb.book.entries } else { '?' })), [Math]::Round($lastLanePnl,2), $lastLaneCount, $totPnl, ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60), $boots)
   }
 
   Start-Sleep -Seconds 5
