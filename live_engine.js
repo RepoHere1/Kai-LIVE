@@ -386,8 +386,18 @@ function pendingExposure() {
     const target = Number.isInteger(q.exchange_index) ? q.exchange_index : 0;
     const movable = target === 0 ? 0 : shardBalance(0);
     const usable = shardBalance(target) + movable - pendingExposure() - CASH_BUFFER;
-    const budget = Math.min(effectiveClip(), usable);
-    const qty = Math.floor(budget / px);
+    // POSITION CAP: no single entry may risk more than max_position_pct of
+    // cash (default 25%). Evidence: a clip-scaled $11.55 entry on a $24
+    // account (47%) - the heat gates only count OPEN positions, so the first
+    // entry after a win could bet anything. This bounds it, always.
+    const posCap = Math.max(0.5, (bal.cash || 0) * ((st().runtime && st().runtime.max_position_pct) || 0.25));
+    const budget = Math.min(effectiveClip(), usable, posCap);
+    // PRICE-AWARE CLIP: the clip is a DOLLAR budget sized for normal prices
+    // (~25c+). At 5c a dollar budget buys hundreds of lottery tickets and one
+    // wrong model call wipes the whole clip (evidence: -$16 settled on a 0.05
+    // entry). Cap contracts as if the clip were spent at a 25c reference.
+    const qtyCap = Math.max(1, Math.ceil(effectiveClip() / 0.25));
+    const qty = Math.min(Math.floor(budget / px), qtyCap);
     if (!(qty >= 1)) {
       ls.skips++; ls.last_skip = 'insufficient live cash for shard ' + target + ' ($' + usable.toFixed(2) + ' usable, 1 contract = $' + px.toFixed(2) + ')';
       return null;

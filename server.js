@@ -1738,7 +1738,7 @@ function getAllNoBook() {
       id: p.id,
       market_id: p.market_id,
       strategy: p.strategy || 'all_no_markets',
-      side: 'NO',
+      side: p.side || 'NO',
       entry_price: p.entry_price,
       quantity: p.quantity,
       cost: Number(safeNum(p.cost).toFixed(2)),
@@ -1757,7 +1757,7 @@ function getAllNoBook() {
       id: t.id || t.order_id || '-',
       market_id: t.market_id,
       strategy: t.strategy || 'all_no_markets',
-      side: 'NO',
+      side: t.side || 'NO',
       entry_price: t.entry_price,
       exit_price: t.exit_price,
       quantity: t.quantity,
@@ -1825,61 +1825,57 @@ async function noBook() {
       if (!no_bid || !no_ask || no_bid <= 0.02 || no_ask >= 0.98) continue;
       
       const spread = no_ask - no_bid;
-      if (spread > 0.05) continue; // skip wide spreads
+      if (spread > 0.06) continue; // skip wide spreads (the hard thin line)
       
-      // Winning pattern, real basis: we ENTER at the bid (maker), so edge is
-      // measured against the bid. Deep-NO only: model NO prob >= min_fair and
-      // entry price <= max_no_price (high win rate, capped risk, big payout).
-      const anCfg = { min_fair: 0.65, max_no_price: 0.32, min_edge: 0.03, ...(state.runtime.all_no || {}) };
-      if (fair < anCfg.min_fair) continue;             // probability floor
-      if (no_bid > anCfg.max_no_price) continue;        // price cap (cheap NO only)
-      const edge = fair - no_bid;                       // REAL maker edge
-      if (edge < anCfg.min_edge) continue;
-      
-      // Kelly with cap
-      const kelly = Math.max(0, edge / (1 - no_bid));
-      const kellyCapped = Math.min(0.25, kelly); // cap at 25% Kelly
-      
-      // Sizing: clip-based with Kelly fraction
-      const qty = Math.max(1, Math.floor(5 * kellyCapped / Math.max(0.01, no_bid)));
-      if (qty < 1) continue;
-      
-      const cost = Number((qty * no_bid).toFixed(2));
-      
-      // Flat 20% stop; winners ride to settlement (TP near-certainty only).
-      const stopLoss = no_bid * 0.8;
-      const takeProfit = 0.95;
-      
-      // Confidence score
-      const confidence = Math.min(1, edge / 0.08);
-      
-      rows.push({
-        id: q.ticker,
-        market: q.title,
-        market_id: q.ticker,
-        strategy: 'all_no_markets',
-        side: 'NO',
-        limit_entry: no_bid, // MAKER at bid
-        qty,
-        cost,
-        fair: Number(fair.toFixed(3)),
-        edge: Number(edge.toFixed(4)),
-        kelly: Number(kellyCapped.toFixed(3)),
-        stop: Number(stopLoss.toFixed(3)),
-        take_profit: Number(takeProfit.toFixed(3)),
-        confidence: Number(confidence.toFixed(2)),
-        expiration: q.close_time,
-        status: 'candidate',
-        source: res.source,
-        host: res.host,
-        no_bid,
-        no_ask,
-        spread,
-        tau,
-        strike: q.strike,
-        sigma: perSec || null,
-        spot_product: asset,
-      });
+      // Deep-value thesis, real basis: we ENTER at the bid (maker), so edge is
+      // measured against the bid. Model prob >= min_fair and entry <= cap
+      // (high win rate, capped risk, big payout).
+      // YES-TWIN: the identical thesis mirrored to the other side of the book -
+      // a cheap high-probability YES is the same trade as a cheap
+      // high-probability NO. One scan, both sides, per-side caps.
+      const anCfg = { min_fair: 0.65, max_no_price: 0.32, max_yes_price: 0.35, min_edge: 0.03, allow_yes: true, ...(state.runtime.all_no || {}) };
+      const mkRow = (side, fairSide, bid, askPx) => {
+        const cap = side === 'YES' ? anCfg.max_yes_price : anCfg.max_no_price;
+        if (bid == null || askPx == null) return;
+        const sideSpread = askPx - bid;
+        if (sideSpread > 0.06) return; // per-side thin line
+        if (fairSide < anCfg.min_fair) return;              // probability floor
+        if (bid > cap) return;                              // price cap (cheap only)
+        if (bid < (anCfg.min_entry_price || 0)) return;     // no sub-floor lottery tickets
+        const e = fairSide - bid;                           // REAL maker edge
+        if (e < anCfg.min_edge) return;
+        const kelly = Math.max(0, e / (1 - bid));
+        const kellyCapped = Math.min(0.25, kelly);          // cap at 25% Kelly
+        const q2 = Math.max(1, Math.floor(5 * kellyCapped / Math.max(0.01, bid)));
+        if (q2 < 1) return;
+        rows.push({
+          id: q.ticker,
+          market: q.title,
+          market_id: q.ticker,
+          strategy: 'all_no_markets',
+          side,
+          limit_entry: bid, // MAKER at bid
+          qty: q2,
+          cost: Number((q2 * bid).toFixed(2)),
+          fair: Number(fairSide.toFixed(3)),
+          edge: Number(e.toFixed(4)),
+          kelly: Number(kellyCapped.toFixed(3)),
+          stop: Number((bid * 0.8).toFixed(3)),
+          take_profit: 0.95,
+          confidence: Number(Math.min(1, e / 0.08).toFixed(2)),
+          expiration: q.close_time,
+          status: 'candidate',
+          source: res.source,
+          host: res.host,
+          spread: sideSpread,
+          tau,
+          strike: q.strike,
+          sigma: perSec || null,
+          spot_product: asset,
+        });
+      };
+      mkRow('NO', fair, no_bid, no_ask);
+      if (anCfg.allow_yes !== false) mkRow('YES', 1 - fair, q.yes_bid, q.yes_ask);
     }
   }
   
@@ -1989,6 +1985,7 @@ function closeAllNoPosition(position_id, exit_price, exit_reason) {
     id: pos.id,
     market_id: pos.market_id,
     strategy: pos.strategy,
+    side: pos.side || 'NO',
     entry_price: pos.entry_price,
     exit_price: Number(exit_price.toFixed(3)),
     quantity: pos.quantity,
@@ -2738,8 +2735,101 @@ function analysisPayload(strategy) {
 }
 
 
+// ---------------------------------------------------------------------------
+// ALL NO BRAIN PASS - the lane brain, generalized to every coin, posting
+// through the operator-lawful all_no lane. The btc lane has ONE funnel; this
+// gives the ON lane four, using the identical brain, gates, and stop
+// machinery that engineTick lanes use. Runtime switch: all_no.brain_mode.
+// ---------------------------------------------------------------------------
+const BRAIN_COINS = [
+  { asset: 'BTC-USD', series: 'KXBTC15M', lane: 'btc_updown' },
+  { asset: 'ETH-USD', series: 'KXETH15M', lane: 'eth_updown' },
+  { asset: 'XRP-USD', series: 'KXXRP15M', lane: 'xrp_updown' },
+  { asset: 'HYPE-USD', series: 'KXHYPE15M', lane: 'hyperliquid_updown' },
+];
+
+async function runAllNoBrainPass() {
+  const cfg = state.runtime.all_no;
+  if (cfg.brain_mode === false) return;
+  const noLs = laneState('all_no_markets');
+  if (!noLs || !noLs.running) return;
+  const cash = LO.cash() || 0;
+  if (cash <= 0) return;
+  const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
+  const pending = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets');
+  if (open.length + pending.length >= (cfg.brain_max_concurrent != null ? cfg.brain_max_concurrent : 2)) return;
+  const busy = new Set(open.map(p => p.market_id));
+  pending.forEach(o => busy.add(o.ticker));
+
+  for (const c of BRAIN_COINS) {
+    const s = spot[c.asset];
+    if (!s || !Number.isFinite(s.price)) continue;
+    // COMBAT: kind discovery rides along (rotated 15m series ids)
+    const seriesList = [c.series];
+    try {
+      const kindHit = await series_kind.resolveFresh(c.lane);
+      if (kindHit && kindHit.series && !seriesList.includes(kindHit.series)) seriesList.push(kindHit.series);
+    } catch (e) { /* static list is fine */ }
+    for (const series of seriesList) {
+      const res = await marketsForSeries(series, 8);
+      const cands = (res.markets || []).filter(m => m.status !== 'finalized' && !m.result && m.strike != null && m.close_time);
+      if (!cands.length) continue;
+      // nearest-strike quotable market (same coherence rules as activeQuote)
+      let q = null, best = -Infinity;
+      for (const m of cands) {
+        const tau = (new Date(m.close_time).getTime() - Date.now()) / 1000;
+        if (tau < (state.runtime.min_tau_sec ?? 30) || tau > 1200) continue;
+        if (m.yes_bid == null || m.yes_ask == null || (m.yes_ask - m.yes_bid) > (state.runtime.max_spread ?? 0.05)) continue;
+        const score = 1 / (1 + Math.abs(Math.log(s.price / m.strike))) * Math.min(1, tau / 300);
+        if (score > best) { best = score; q = m; }
+      }
+      if (!q || busy.has(q.ticker)) continue;
+      const tau = Math.max(0, (new Date(q.close_time).getTime() - Date.now()) / 1000);
+      const perSec = perSecondVol(c.asset, 900);
+      const volWindow = s.points.slice(-20).map(p => p.p);
+      const result = brain.evaluate({
+        q, spotPrice: s.price, strike: q.strike, tau, perSecVol: perSec,
+        volWindow, fills: [], history: noLs.price_history || [],
+        quotes: [q], weights: state.signal_weights,
+      });
+      if (!result.side) continue;
+      const side = result.side;
+      const price = side === 'YES' ? q.yes_bid : q.no_bid;
+      if (price == null) continue;
+      // Coin-flip zone: never chase expensive contracts.
+      const maxPrice = cfg.brain_max_price != null ? cfg.brain_max_price : 0.60;
+      const minPrice = state.runtime.min_price ?? 0.05;
+      if (price >= maxPrice || price < minPrice) continue;
+      if (result.edge < (state.runtime.min_edge ?? 0.015)) continue;
+      if (result.confidence < (state.runtime.min_confidence ?? 0.30)) continue;
+      const kellyFraction = Math.max(0, result.edge / (1 - price));
+      if (kellyFraction < (state.runtime.min_kelly ?? 0.005)) continue;
+      // Portfolio heat across the live account
+      const totalExposure = state.live.positions.reduce((a, p) => a + (p.cost || 0), 0);
+      if (totalExposure > cash * (state.runtime.max_exposure_pct ?? 0.3)) continue;
+      // Per-market retry throttle (shared with the deep-value pass)
+      const lastTry = cfg._last_try || (cfg._last_try = {});
+      if (lastTry[q.ticker] && Date.now() - lastTry[q.ticker] < 90000) continue;
+      lastTry[q.ticker] = Date.now();
+      // Post at the LIVE stream bid, capped
+      const qq = await quoteForTicker(q.ticker);
+      if (!qq || qq.exchange_index == null) continue;
+      const liveBid = side === 'YES' ? qq.yes_bid : qq.no_bid;
+      if (liveBid == null || liveBid > maxPrice) continue;
+      const lane = { name: 'all_no_markets', horizon: '15m-brain', spot: c.asset };
+      log('all_no_brain_post', { market_id: q.ticker, asset: c.asset, side, px: liveBid, fair: result.fair, edge: result.edge, reason: result.reason, regime: result.regime });
+      const rec = await openLivePosition(lane, qq, side, liveBid, result.fair != null ? result.fair : liveBid, result.edge, perSec);
+      if (rec) busy.add(q.ticker);
+      const openNow = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0).length;
+      const pendingNow = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets').length;
+      if (openNow + pendingNow >= (cfg.brain_max_concurrent != null ? cfg.brain_max_concurrent : 2)) return;
+    }
+  }
+}
+
+
 async function runAllNoEngine() {
-  if (state.mode === 'live') return runAllNoLive(); // ALL NO places real orders in LIVE
+  if (state.mode === 'live') { await runAllNoLive(); await runAllNoBrainPass(); return; } // ALL NO places real orders in LIVE
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
   if (!noLs || !noLs.running) return;
@@ -2795,11 +2885,12 @@ async function runAllNoLive() {
     if (r.edge < cfg.min_edge || r.kelly <= 0 || r.confidence < cfg.min_confidence) continue;
     if (r.spread < cfg.min_spread || r.spread > cfg.max_spread) continue;
     if (r.tau < cfg.min_tau_sec || r.tau > cfg.max_tau_sec) continue;
-    // WINNING pattern (configurable): buy NO when the model says NO is >= min_fair likely and the
-    // NO costs <= max_no_price. Capped downside + high probability = positive expectancy.
+    // Deep-value pattern (configurable): buy the side the model says is >= min_fair
+    // likely while it costs <= that side's cap. Capped downside + high probability
+    // = positive expectancy. YES-TWIN rows carry their own cap.
     const minFair = cfg.min_fair || 0.65;
-    const maxNoPx = cfg.max_no_price || 0.32;
-    if (r.fair < minFair || r.limit_entry > maxNoPx) continue;
+    const sideCap = r.side === 'YES' ? (cfg.max_yes_price != null ? cfg.max_yes_price : 0.35) : (cfg.max_no_price || 0.32);
+    if (r.fair < minFair || r.limit_entry > sideCap) continue;
     // CONVICTION PRESS: one position per market unless the settled-trade
     // record for this (asset, price bucket) is verified >=80% wins - then a
     // second add is earned from facts, not brain confidence.
@@ -2810,6 +2901,10 @@ async function runAllNoLive() {
     const sameMarket = state.live.positions.filter(p => p.market_id === r.market_id && p.qty > 0).length
       + (state.live.orders || []).filter(o => o.market_id === r.market_id && o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling')).length;
     if (sameMarket >= (press.level >= 2 ? 2 : 1)) continue;
+    // CLUSTER CAP: correlated same-round entries die together. At most 2
+    // positions share one contract round (close time).
+    const sameRound = state.live.positions.filter(p => p.qty > 0 && p.strategy === 'all_no_markets' && p.close_time && r.expiration && Math.abs(new Date(p.close_time).getTime() - new Date(r.expiration).getTime()) < 1000).length;
+    if (sameRound >= 2) continue;
     if (press.level > 1) {
       log('conviction_press', { market_id: r.market_id, level: press.level, n: press.n, win_rate: Number((press.winRate || 0).toFixed(3)) });
     }
@@ -2820,14 +2915,15 @@ async function runAllNoLive() {
     const q = await quoteForTicker(r.market_id);
     if (!q || q.exchange_index == null) continue;
     const lane = { name: 'all_no_markets', horizon: 'no-side', spot: r.spot_product || null };
-    // Post at the LIVE stream NO bid, not the scan-time bid: the scan quote is stale by the
+    // Post at the LIVE stream bid, not the scan-time bid: the scan quote is stale by the
     // time the order posts, which caused most orders to be rejected as 'post only cross'.
     // CAP ENFORCED ON THE LIVE BID TOO: the live bid can be far above the scan
-    // bid (0.47/0.53 fills happened); never chase above maxNoPx.
-    if (q.no_bid == null || q.no_bid > maxNoPx) continue;
-    const entryPx = q.no_bid;
-    log('all_no_post', { market_id: r.market_id, live_bid: q.no_bid, px: entryPx, cap: maxNoPx, fair: r.fair, edge: r.edge });
-    const rec = await LO.openEntry(lane, q, 'NO', entryPx, r.fair, r.edge, null);
+    // bid (0.47/0.53 fills happened); never chase above the side cap.
+    const liveBid = r.side === 'YES' ? q.yes_bid : q.no_bid;
+    if (liveBid == null || liveBid > sideCap) continue;
+    const entryPx = liveBid;
+    log('all_no_post', { market_id: r.market_id, side: r.side || 'NO', live_bid: liveBid, px: entryPx, cap: sideCap, fair: r.fair, edge: r.edge });
+    const rec = await LO.openEntry(lane, q, r.side || 'NO', entryPx, r.fair, r.edge, null);
     if (rec) busy.add(r.market_id);
     const openNow = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0).length;
     const pendingNow = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets').length;
@@ -2841,7 +2937,7 @@ function syncAllNoView() {
   if (!book) return;
   const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
   book.positions = open.map(p => ({
-    id: p.id, market_id: p.market_id, side: 'NO', entry_price: p.entry_price,
+    id: p.id, market_id: p.market_id, side: p.side || 'NO', entry_price: p.entry_price,
     quantity: p.qty, cost: p.cost, fair_at_entry: p.fair_at_entry, edge: p.edge_at_entry,
     kelly: 0, stop_loss: p.stop_loss, take_profit: p.take_profit, confidence: 0,
     expiration: p.close_time, status: 'resting', opened_at: p.opened, mark: p.mark || p.entry_price, pnl: 0,
@@ -2864,9 +2960,8 @@ async function runAllNoExits() {
     if (pos.status !== 'resting') continue;
     
     const q = await quoteForTicker(pos.market_id);
-    if (!q || !q.no_bid) continue;
-    
-    const mark = q.no_bid;
+    const mark = pos.side === 'YES' ? (q ? q.yes_bid : null) : (q ? q.no_bid : null);
+    if (!q || mark == null) continue;
     const tau = Math.max(0, (new Date(pos.expiration).getTime() - Date.now()) / 1000);
     const totalLife = Math.max(1, (new Date(pos.expiration).getTime() - new Date(pos.opened_at).getTime()) / 1000);
     const lifePct = 1 - tau / totalLife;
