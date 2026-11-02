@@ -71,8 +71,10 @@ function create(deps) {
       // which flags it as STALE (429). Removing this restore fixed oversized orders that used
       // the old $12.64 number while the real account had less.
       if (/429/.test(bal.error)) {
-        bal.backoff_until = Date.now() + 60 * 1000;
-        setTimeout(() => scheduleBalance(), 60 * 1000 + 500);
+        // Longer backoff: a 60s retry ping-ponged with other pollers at the
+        // rate limit and sustained the 429 loop indefinitely.
+        bal.backoff_until = Date.now() + 150 * 1000;
+        setTimeout(() => scheduleBalance(), 150 * 1000 + 500);
       }
     }
     return bal;

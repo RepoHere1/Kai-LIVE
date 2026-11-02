@@ -105,15 +105,15 @@ body::before{
   transition:border-color .18s ease, box-shadow .18s ease;
 }
 body[data-mode="dry"]{--mode-color:var(--up);--mode-glow:rgba(46,230,168,.32)}
-body[data-mode="live"]{--mode-color:#FFA500;--mode-glow:rgba(255,165,0,.32)}
+body[data-mode="live"]{--mode-color:#FF6600;--mode-glow:rgba(255,102,0,.32)}
 /* Green border on every card when DRY - simulated money, clean frame */
 body[data-mode="dry"] .card{border:1px solid var(--up)}
 body[data-mode="dry"] .card:hover{border-color:var(--up)}
 body[data-mode="dry"] .tile{border:1px solid var(--up)}
 /* Bright orange border on every card when LIVE - real money is leaving the account. */
-body[data-mode="live"] .card{border:1px solid #FFA500}
-body[data-mode="live"] .card:hover{border-color:#FFA500}
-body[data-mode="live"] .tile{border:1px solid #FFA500}
+body[data-mode="live"] .card{border:1px solid #FF6600}
+body[data-mode="live"] .card:hover{border-color:#FF6600}
+body[data-mode="live"] .tile{border:1px solid #FF6600}
 /* The logo keeps its subtle red accent (it is the brand). */
 body[data-mode="live"] .brand .logo{border-color:rgba(77,159,255,.4);box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(43,108,255,.35)}
 body[data-mode="dry"]  .brand .logo{border-color:rgba(77,159,255,.4);box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 6px 20px rgba(43,108,255,.35)}
@@ -3043,8 +3043,8 @@ function renderNoHeatmap(d) {
   st.textContent = '.monthbtn{height:100%;padding:0 13px;min-width:66px;border-radius:8px;background:rgba(255,255,255,.05);'
     + 'border:1px solid rgba(255,255,255,.12);cursor:pointer;color:#cfe3ff;font-weight:700;font-size:11.5px;'
     + 'display:flex;align-items:center;justify-content:center;gap:4px;transition:border-color .15s,background .15s}'
-    + '.monthbtn:hover{border-color:#FFA500}'
-    + '.monthbtn.open{background:rgba(255,165,0,.16);border-color:#FFA500;color:#ffd9a0}';
+    + '.monthbtn:hover{border-color:#FF6600}'
+    + '.monthbtn.open{background:rgba(255,102,0,.16);border-color:#FF6600;color:#ffd9a0}';
   document.head.appendChild(st);
 
   function toggle(M) {
@@ -3087,7 +3087,7 @@ function renderNoHeatmap(d) {
       var yearTag = Object.keys(yr).length ? Object.keys(yr).sort().reverse()[0] : new Date().getFullYear();
       var title = M.m + ' ' + yearTag + ' trading book';
       if (!ts.length) {
-        panel.innerHTML = '<div style="padding:14px;border:1px solid rgba(255,165,0,.25);border-radius:10px;'
+        panel.innerHTML = '<div style="padding:14px;border:1px solid rgba(255,102,0,.25);border-radius:10px;'
           + 'background:rgba(13,22,36,.92);margin:8px 0;color:#cfe3ff;font-size:13px">'
           + '<b>' + title + '</b> &mdash; no closed trades this month.</div>';
         return;
@@ -3117,7 +3117,7 @@ function renderNoHeatmap(d) {
           + '<b style="font-size:14px;color:' + (cls || '#e8f1ff') + '">' + v + '</b>'
           + '<div style="font-size:10px;color:#8494ab;margin-top:2px">' + l + '</div></div>';
       }
-      var html = '<div style="border:1px solid rgba(255,165,0,.25);border-radius:10px;background:rgba(13,22,36,.92);padding:14px;margin:8px 0">'
+      var html = '<div style="border:1px solid rgba(255,102,0,.25);border-radius:10px;background:rgba(13,22,36,.92);padding:14px;margin:8px 0">'
         + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">'
         + '<b style="font-size:15px;color:#ffd9a0">' + M.icon + ' ' + title + '</b>'
         + '<span style="font-size:12px;color:#8494ab">' + ts.length + ' closed trades</span></div>'

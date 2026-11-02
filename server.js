@@ -1386,7 +1386,10 @@ async function markLivePositions() {
 async function engineTick() {
   await LO.reconcile();
   await markLivePositions();
-  const list = LANES.filter(l => true);
+  // all_no is not a series lane: it has no series of its own and gets probed
+  // by its own scanner. Running it through activeQuote here only overwrote
+  // the scanner's real skip reason with a cosmetic 'no series'.
+  const list = LANES.filter(l => l.name !== 'all_no_markets');
   for (const lane of list) {
     const ls = laneState(lane.name);
     if (!ls.running) continue;
@@ -1703,12 +1706,29 @@ function lastProvenance() {
 // ---------------------------------------------------------------------------
 // ALL NO book - separate book tracking NO-side market positions + trades
 // ---------------------------------------------------------------------------
-function getAllNoBook() {
+// YES / NO view of the ALL NO book (YES-TWIN rows live in this book too).
+// Trades with no stored side are legacy NO. Only the VIEW is filtered: the
+// engine, the shared balance and the stored records are untouched.
+function bookForSide(src, sideFilter) {
+  const want = sideFilter === 'YES' || sideFilter === 'NO' ? sideFilter : null;
+  if (!want) return src;
+  const sideOk = t => (t.side || 'NO') === want;
+  const positions = (src.positions || []).filter(sideOk);
+  const closed = (src.closed_trades || []).filter(sideOk);
+  return Object.assign({}, src, {
+    positions,
+    closed_trades: closed,
+    total_pnl: closed.reduce((a, t) => a + (Number(t.pnl) || 0), 0),
+    entries: positions.length + closed.length,
+  });
+}
+
+function getAllNoBook(sideFilter) {
   // Return current ALL NO book state (open positions + closed trades + tallies)
   // The NO book runs in its own ledger: state.all_no['dry'] for paper DRY,
   // state.all_no['dry'] for real-money DRY.
   const mode = state.mode;
-  const rawBook = state.all_no[mode] || {};
+  const rawBook = bookForSide(state.all_no[mode] || {}, sideFilter);
   const safeNum = (v, d = 0) => { const x = Number(v); return Number.isFinite(x) ? x : d; };
   const book = {
     starting_balance: safeNum(rawBook.starting_balance, 250),
@@ -2170,6 +2190,17 @@ async function serveDashboard(route, res) {
   } catch (e) { res.writeHead(500); return res.end('page missing: ' + e.message); }
 }
 
+async function serveYesMarkets(res) {
+  // YES side of the ALL NO book: same white-ledger page, YES rows only
+  // (the page reads /api/no-lanes/book?side=YES).
+  const file = path.join(HERE, 'yes-markets.html');
+  try {
+    const html = fs.readFileSync(file, 'utf8');
+    res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });
+    return res.end(html);
+  } catch (e) { res.writeHead(500); return res.end('page missing: ' + e.message); }
+}
+
 async function serveAllNoMarkets(res) {
   // ALL NO MARKETS: separate white-ledger page with independent book data
   const file = path.join(HERE, 'all-no-markets.html');
@@ -2221,6 +2252,9 @@ async function handle(req, res) {
   }
   if (p === '/all-no-markets') {
     return serveAllNoMarkets(res);
+  }
+  if (p === '/yes-markets') {
+    return serveYesMarkets(res);
   }
   if (/^\/[A-Za-z0-9_.\-]+\.(js|css|png|svg|json)$/.test(p)) {
     const file = path.join(HERE, path.basename(p));
@@ -2317,7 +2351,7 @@ async function handle(req, res) {
   if (p === '/api/no-lanes/book') {
     // Return ALL NO book: positions, trades, and tallies + real account cash so
     // the tape/dashboards see EXTERNAL moves (direct Kalshi trades, deposits).
-    const bookData = getAllNoBook();
+    const bookData = getAllNoBook(u.searchParams.get('side'));
     return json(res, Object.assign(bookData, { generated_at: new Date().toISOString(), acct: { cash: LO.cash(), stale: LO.cash() == null } }));
   }
   
@@ -2828,6 +2862,14 @@ async function runAllNoBrainPass() {
       const side = result.side;
       const price = side === 'YES' ? q.yes_bid : q.no_bid;
       if (price == null) continue;
+      // FAIR FLOOR (the missing gate): a YES entry with fair 0.503 is a coin
+      // flip the model does NOT favor - it entered, stopped out, and proved
+      // the point. The bought side must be rated at least min_fair.
+      {
+        const fairFloor = c.asset === 'HYPE-USD' ? Math.max(cfg.min_fair || 0.5, 0.58) : (cfg.min_fair || 0.5);
+        if (result.fair == null || result.fair < fairFloor) continue;
+      }
+      if (price < (cfg.min_entry_price != null ? cfg.min_entry_price : 0.05)) continue;
       // TOO-GOOD FILTER (same as the deep scanner): every brain loss claimed
       // 0.22-0.59 "edge" - that is model error, not free money.
       if (result.edge > (cfg.max_edge != null ? cfg.max_edge : 0.18)) continue;
@@ -3159,6 +3201,12 @@ async function boot() {
   setInterval(async () => {
     try {
       if (Date.now() < acctWatchBackoffUntil) return;
+      // Only force a REST poll when the streamed balance is genuinely old.
+      // Polling every 60s unconditionally ping-pongs with the engine's own
+      // 429 retry at the rate limit (self-sustaining 429 loop).
+      const snap0 = LO.snapshot();
+      const ageMs = snap0.as_of ? Date.now() - new Date(snap0.as_of).getTime() : Infinity;
+      if (ageMs < 90000) return;
       const before = LO.cash();
       await LO.refreshSnapshot();
       const snap = LO.snapshot();
