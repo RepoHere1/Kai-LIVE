@@ -2330,7 +2330,7 @@ async function handle(req, res) {
     const out = {};
     for (const lane of LANES) {
       const ls = laneState(lane.name);
-      out[lane.name] = { name: lane.name, label: lane.label, running: !!ls.running, mode: state.mode, series: ls.last_series, entries: ls.entries, skips: ls.skips, last_skip: ls.last_skip, last_edge: ls.last_edge, heartbeat: ls.heartbeat };
+      out[lane.name] = { name: lane.name, label: lane.label, running: !!ls.running, mode: state.mode, series: ls.last_series, entries: ls.entries, skips: ls.skips, last_skip: ls.last_skip, last_edge: ls.last_edge, heartbeat: ls.last_tick || ls.heartbeat };
     }
     return json(res, out);
   }
@@ -2411,7 +2411,10 @@ async function handle(req, res) {
     const total = all.length;
     const pages = Math.max(1, Math.ceil(total / per));
     const slice = all.slice((page - 1) * per, page * per);
-    return json(res, { page, pages, total, per_page: per, book, trades: slice });
+    // total_pnl: exact aggregate over the ENTIRE lane book so the tape can do its
+    // math without paging through history. On LIVE, all_no trades live in this same
+    // closed list - EXCLUDE them so book pnl + lanes pnl never double-counts.
+    return json(res, { page, pages, total, per_page: per, book, trades: slice, total_pnl: Number(all.filter((t) => t.strategy !== 'all_no_markets').reduce((a, t) => a + (Number(t.pnl) || 0), 0).toFixed(2)) });
   }
 
   // --- monitoring panels data
@@ -2773,14 +2776,19 @@ async function runAllNoEngine() {
 }
 
 async function runAllNoLive() {
+  const noLsX = laneState('all_no_markets');
+  if (!noLsX || !noLsX.running) return;
+  noLsX.heartbeat = new Date().toISOString(); // scanner-alive truth every pass
   const rows = await noBook();
+  if (!rows.length) noLsX.last_skip = 'scan pass: no candidates met the NO gates';
   const cfg = state.runtime.all_no;
   const cash = LO.cash() || 0;
   const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
   const pending = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets');
   const exposure = open.reduce((a, p) => a + p.cost, 0) + pending.reduce((a, o) => a + Math.max(0, o.qty - (o.filled || 0)) * o.price, 0);
-  if (cash <= 0 || exposure >= cash * cfg.max_exposure_pct) return;
-  if (open.length + pending.length >= cfg.max_concurrent) return;
+  if (cash <= 0) { noLsX.last_skip = 'no live cash'; return; }
+  if (exposure >= cash * cfg.max_exposure_pct) { noLsX.last_skip = 'portfolio heat limit'; return; }
+  if (open.length + pending.length >= cfg.max_concurrent) { noLsX.last_skip = 'max concurrent positions'; return; }
   const busy = new Set(open.map(p => p.market_id));
   pending.forEach(o => busy.add(o.ticker));
   for (const r of rows) {
