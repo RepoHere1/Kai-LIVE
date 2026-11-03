@@ -428,3 +428,38 @@ WHY DRY LOOKED PROFITABLE WHILE LIVE LOST - two structural lies in the lab:
 STATUS: LIVE gate live (floor .50 caps .70 fair .62), 0 open positions,
 crash.log witnessing on both servers (it recorded DRY's 04:09 restart).
 n=85 is still small - this gate is evidence-backed, not a promise.
+---
+
+## 2026-11-03 SIZE GOVERNOR (operator decision: keep trading, cut size)
+
+Applied to LIVE only; DRY keeps its own paper sizing.
+  clip_state.base = 1.50, clip_state.max = 1.50   (ceiling == base)
+  runtime.clip = 1.50, runtime.max_position_pct = 0.30
+  all_no.max_concurrent = 2, all_no.max_exposure_pct = 0.6
+Code defaults in server.js + live_engine.js changed from { base: 3, max: 25 }
+to { base: 1.5, max: 1.5 } so a wiped state.json cannot silently restore the
+auto-growing clip.
+WHY THE CEILING MATTERS: noteClipOutcome() adds +1 to base every 3 wins up to
+max (was 25). Setting only runtime.clip would have been climbed straight back
+up by the first winning streak - the governor caps the grower itself.
+
+OPS INCIDENTS DURING THIS CHANGE (all mine, all fixed):
+  1) I put a // comment INSIDE a parenthesised expression, swallowing the
+     closing ');' - LIVE refused to boot (SyntaxError). Reverted to the last
+     good commit, re-applied as a pure value swap, node --check clean on both
+     files, LIVE booted (boot_count 19, visible in crash.log).
+     LESSON: comments never go on a line whose tail is required syntax.
+  2) Scheduled task \KaiWatchdog (temp\opencode\watchdog.ps1 -> kctl.ps1)
+     resurrected LIVE 43s after I stopped it; that stale process then saved
+     state.json from its own memory and CLOBBERED my governor edit. Disabled
+     the task, stopped LIVE cleanly, wrote state, started via kctl, proved
+     the values survived saves, re-armed the task. Verified the watchdog only
+     restarts the PROCESS - it never writes ls.running, so lane toggles still
+     obey OPERATOR_LAW.
+  3) kai.pid pointed at a dead pid while the real server ran under a
+     different pid, so 'kctl stop live' could not stop the running server
+     (that is what caused my 04:40 EADDRINUSE death). pidfile realigned.
+
+STATE: 9/9 lanes running, 0 open positions, 0 resting orders. Gate = price
+.50-.70 either side, fair>=.62, edge<=.30. Exits = TP .95 / disaster floor
+.30x entry / decay at 90% life. No trail stop anywhere.
