@@ -1,0 +1,33 @@
+{
+  "_comment": "OPERATOR RISK CONFIG - version controlled on purpose. Loaded OVER state.json at every boot so a torn, deleted or corrupted state file can never loosen these gates. Edit here, commit, restart.",
+  "runtime": {
+    "clip": 1.5,
+    "min_edge": 0.015,
+    "max_price": 0.6,
+    "min_price": 0.05,
+    "take_profit": 0.9,
+    "stop_loss": 0.2,
+    "max_exposure_pct": 0.5,
+    "all_no": {
+      "min_entry_price": 0.5,
+      "max_no_price": 0.7,
+      "max_yes_price": 0.7,
+      "min_fair": 0.62,
+      "max_fair": 0.75,
+      "min_edge": 0.015,
+      "max_edge": 0.3,
+      "min_confidence": 0.3,
+      "min_spread": 0.005,
+      "max_spread": 0.08,
+      "max_concurrent": 2,
+      "brain_max_concurrent": 2,
+      "brain_max_price": 0.7,
+      "brain_mode": true,
+      "max_exposure_pct": 0.6,
+      "min_tau_sec": 40,
+      "max_tau_sec": 2100,
+      "max_hold_pct": 0.85,
+      "allow_yes": true
+    }
+  }
+}

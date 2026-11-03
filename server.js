@@ -41,19 +41,27 @@ const { KalshiWS } = require('./kalshi_ws');
 const { CoinbaseWS } = require('./coinbase_ws');
 
 const HERE = __dirname;
-// CRASH WITNESS (2026-11-03): a silent death looked like 'LIVE loves to fail'.
-// Every exit path now stamps crash.log BEFORE the process goes away.
+// CRASH WITNESS (2026-11-03). A silent death looked like "LIVE loves to fail".
+// Registered at the very TOP of the module so even a failure during boot is
+// captured. Every line carries the PID, and the exit handler captures the CALL
+// STACK that ended the process, so a death is always attributable.
 try {
-  const APPEND = (line) => fs.appendFileSync(path.join(HERE, 'crash.log'), line + String.fromCharCode(10));
-  process.on('uncaughtException', (e) => { APPEND(new Date().toISOString() + ' UNCAUGHT ' + (e && e.stack ? e.stack : e)); process.exit(1); });
-  process.on('unhandledRejection', (r) => APPEND(new Date().toISOString() + ' REJECTION ' + (r && r.stack ? r.stack : String(r))));
-  process.on('exit', (code) => APPEND(new Date().toISOString() + ' EXIT code=' + code));
-  process.on('SIGTERM', () => { APPEND(new Date().toISOString() + ' SIGTERM'); process.exit(143); });
-  process.on('SIGINT', () => { APPEND(new Date().toISOString() + ' SIGINT'); process.exit(130); });
-  // LAST WORDS: even a /F kill or power loss leaves the final alive-stamp -
-  // the gap between last words and the next boot IS the exact time of death.
-  setInterval(() => { try { APPEND(new Date().toISOString() + ' ALIVE uptime=' + Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000) + 's'); } catch (e) {} }, 30000);
+  const APPEND = (line) => { try { fs.appendFileSync(path.join(HERE, 'crash.log'), line + String.fromCharCode(10)); } catch (e) { } };
+  const STAMP = () => new Date().toISOString() + ' pid=' + process.pid;
+  process.on('uncaughtException', (e) => { APPEND(STAMP() + ' UNCAUGHT ' + (e && e.stack ? e.stack : e)); process.exit(1); });
+  process.on('unhandledRejection', (r) => APPEND(STAMP() + ' REJECTION ' + (r && r.stack ? r.stack : String(r))));
+  process.on('exit', (code) => {
+    let who = '';
+    try { who = String(new Error('exit-here').stack || '').split('\n').slice(1, 5).join(' | '); } catch (e) { }
+    APPEND(STAMP() + ' EXIT code=' + code + ' via ' + who);
+  });
+  process.on('SIGTERM', () => { APPEND(STAMP() + ' SIGTERM'); process.exit(143); });
+  process.on('SIGINT', () => { APPEND(STAMP() + ' SIGINT'); process.exit(130); });
+  // LAST WORDS: even an /F kill or power loss leaves the final alive-stamp; the
+  // gap between last words and the next boot IS the exact time of death.
+  setInterval(() => { try { APPEND(STAMP() + ' ALIVE uptime=' + Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000) + 's'); } catch (e) { } }, 30000);
 } catch (e) { console.error('crash witness init failed', e.message); }
+
 
 const ENV = kalshi.ENV;
 const PORT = Number(ENV.PORT || 8788);  // LIVE server: port 8788
@@ -628,6 +636,11 @@ function exterminateSupervisors() {
 // Persisted state
 // ---------------------------------------------------------------------------
 const STATE_FILE = path.join(HERE, 'state.json');
+const STATE_BACKUP_FILE = path.join(HERE, 'state.backup.json');
+const STATE_TMP_FILE = path.join(HERE, 'state.json.tmp');
+const CONFIG_FILE = path.join(HERE, 'config.json');
+let STATE_SOURCE = 'primary';
+let STATE_LOAD_ERROR = null;
 const DRY_PAPER_STARTING_BALANCE = 10000; // Paper trading starting balance
 function defaultState() {
   const allNoStart = 250;
@@ -814,18 +827,56 @@ maker_only: true
   };
 }
 function loadState() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    const base = defaultState();
-    const rawLive = raw.live || {};
-    return Object.assign(base, raw, {
-      runtime: Object.assign(base.runtime, raw.runtime || {}),
-      live: Object.assign(base.live, rawLive),
-      all_no: Object.assign(base.all_no, raw.all_no || {}),
-    });
-  } catch (e) { return defaultState(); }
+  // DURABLE STATE IO (2026-11-03). The old loader swallowed a CORRUPT state file
+  // and returned defaultState() - that is exactly how a watchdog restart turned 9
+  // running lanes into 0 and threw away every risk gate. New rule:
+  //   primary state.json -> state.backup.json -> FAIL CLOSED (no trading).
+  // Never, ever boot into default risk settings with money on the line.
+  const base = defaultState();
+  let raw = null, source = 'none', err = null;
+  for (const cand of [[STATE_FILE, 'primary'], [STATE_BACKUP_FILE, 'backup']]) {
+    try { raw = JSON.parse(fs.readFileSync(cand[0], 'utf8')); source = cand[1]; break; }
+    catch (e) { err = e; }
+  }
+  if (raw) {
+    Object.assign(base, raw);
+    base.runtime = Object.assign(base.runtime, raw.runtime || {});
+    if (raw.runtime && raw.runtime.all_no) base.runtime.all_no = Object.assign(base.runtime.all_no || {}, raw.runtime.all_no);
+    for (const k of ['all_no', 'live', 'dry', 'lane_configs', 'lanes', 'clip_state']) {
+      if (raw[k] && typeof raw[k] === 'object' && !Array.isArray(raw[k])) base[k] = Object.assign({}, base[k] || {}, raw[k]);
+    }
+  }
+  // VERSION-CONTROLLED RISK CONFIG. config.json lives in git, so the operator's
+  // gates survive ANY state file accident (torn write, deleted file, bad edit).
+  let cfg = null;
+  try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (e) { cfg = null; }
+  if (cfg && cfg.runtime) {
+    base.runtime = Object.assign(base.runtime, cfg.runtime);
+    if (cfg.runtime.all_no) base.runtime.all_no = Object.assign(base.runtime.all_no || {}, cfg.runtime.all_no);
+  }
+  base.state_source = source;
+  base.safe_mode = (source === 'none');
+  if (base.safe_mode) {
+    base.lanes = {};
+    base.no_lanes_enabled = false;
+    base.state_error = String((err && err.message) || err || 'state file unreadable');
+  } else {
+    base.state_error = null;
+  }
+  STATE_SOURCE = source;
+  STATE_LOAD_ERROR = base.state_error;
+  return base;
 }
 let state = loadState();
+global.__KAI_TRADE_BLOCKED = !!state.safe_mode;
+// The boot note goes straight to crash.log and NEVER through log(): log() touches
+// structures (provLog) that are not initialised yet at this point of module load,
+// and the RECOVERY path must never be able to crash the process it is recovering.
+try {
+  fs.appendFileSync(path.join(HERE, 'crash.log'), new Date().toISOString() +
+    ' BOOT source=' + STATE_SOURCE + ' safe_mode=' + (state.safe_mode ? 'YES' : 'no') +
+    ' error=' + (STATE_LOAD_ERROR || 'none') + '\n');
+} catch (e) { }
 // BOOT COUNTER: every process start bumps this; the tape PULSE prints it so
 // silent watchdog restart loops become visible.
 state.boot_count = (state.boot_count || 0) + 1;
@@ -846,11 +897,35 @@ const LO = require('./live_engine').create({
   persistPosition: (pos) => persistPosition(pos),
 });
 let saveTimer = null;
+function writeStateAtomic() {
+  // ATOMIC REPLACE. Write temp -> fsync -> rename. The old writeFileSync could
+  // leave a half-written state.json if the process was killed mid-save, and the
+  // next boot then silently reverted to defaults.
+  let payload = null;
+  try { payload = JSON.stringify(state, null, 1); } catch (e) { return false; }
+  const tmp = STATE_TMP_FILE + '.' + process.pid;
+  try {
+    const fd = fs.openSync(tmp, 'w');
+    try { fs.writeSync(fd, payload); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, STATE_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) { }
+    return false;
+  }
+  try {
+    const now = Date.now();
+    if (!writeStateAtomic._last || now - writeStateAtomic._last > 15000) {
+      fs.copyFileSync(STATE_FILE, STATE_BACKUP_FILE);
+      writeStateAtomic._last = now;
+    }
+  } catch (e) { }
+  return true;
+}
 function save() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1)); } catch (e) { }
+    writeStateAtomic();
   }, 250);
 }
 function laneState(name) {
@@ -1879,6 +1954,7 @@ async function noBook() {
       // high-probability NO. One scan, both sides, per-side caps.
       const anCfg = { min_fair: 0.65, max_no_price: 0.32, max_yes_price: 0.35, min_edge: 0.03, allow_yes: true, ...(state.runtime.all_no || {}) };
       const mkRow = (side, fairSide, bid, askPx) => {
+        if (state.safe_mode) return;   // FAIL CLOSED
         const cap = side === 'YES' ? anCfg.max_yes_price : anCfg.max_no_price;
         if (bid == null || askPx == null) return;
         const sideSpread = askPx - bid;
@@ -1887,6 +1963,10 @@ async function noBook() {
         // more probability margin there (evidence: its biggest losses both ways).
         const fairFloor = asset === 'HYPE-USD' ? Math.max(anCfg.min_fair, 0.58) : anCfg.min_fair;
         if (fairSide < fairFloor) return;                   // probability floor
+        // CONFIDENCE CEILING (2026-11-03 calibration): the model's loudest claims
+        // were its worst - LIVE fair .80+ won 50%, .55-.60 won 0/8, .62-.75 won 72.5%.
+        // max_fair unset = 9.99 = ceiling disabled, so the lab keeps sampling this zone.
+        if (fairSide > (anCfg.max_fair != null ? anCfg.max_fair : 9.99)) return;
         if (bid > cap) return;                              // price cap (cheap only)
         if (bid < (anCfg.min_entry_price || 0)) return;     // no sub-floor lottery tickets
         // MOMENTUM CONFIRMATION: the gaussian model knows only distance from
@@ -2282,12 +2362,23 @@ async function handle(req, res) {
   // --- health / settings
   if (p === '/api/health') {
     const bootCash = await liveCash();
-    return json(res, {
+    return json(res, { ok: true, safe_mode: !!state.safe_mode, state_source: state.state_source || 'primary', boots: state.boot_count || 0, pid: process.pid,
       ok: true, mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
       hosts: { kalshi_live: kalshi.LIVE_BASE, kalshi_demo: kalshi.DEMO_BASE, spot: 'api.exchange.coinbase.com', llm: ENV.KILO_BASE_URL },
       credentials: { live_key: kalshi.accounts.live.keyId, demo_key: kalshi.accounts.demo.keyId, llm_token: (ENV.KILO_TOKEN || '').slice(0, 12) + '...' },
       live_balance: bootCash,
     });
+  }
+
+  if (p === '/api/shutdown' && method === 'POST') {
+    // GRACEFUL STOP. The watchdog and kctl call this FIRST so state is flushed
+    // atomically before the process goes away. A force kill (taskkill /F) is
+    // what produced torn state files and mystery lane resets.
+    try { writeStateAtomic(); } catch (e) { }
+    log('control', { action: 'shutdown', pid: process.pId || process.pid, state_source: STATE_SOURCE, safe_mode: !!state.safe_mode });
+    json(res, { ok: true, stopping: true, state_source: STATE_SOURCE, safe_mode: !!state.safe_mode, boots: state.boot_count || 0 });
+    setTimeout(() => { try { process.exit(0); } catch (e) { } }, 250);
+    return;
   }
   if (p === '/api/provenance') {
     return json(res, { provenance: lastProvenance(), lanes: cards(), spot: Object.fromEntries(SPOT_PRODUCTS.map(x => [x, { price: spot[x].price, at: spot[x].at ? new Date(spot[x].at).toISOString() : null, ticks: spot[x].points.length, vol_per_sec: perSecondVol(x, 900) }])) });
@@ -2426,7 +2517,7 @@ async function handle(req, res) {
             ls.stop_reason = ls.running ? '' : 'operator stop';
             ls.heartbeat = new Date().toISOString();
             // Synchronous save for operator commands - must persist immediately
-            try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1)); } catch (e) { }
+            writeStateAtomic();
             // OPERATOR_LAW: the operator just moved a lane - EXTERMINATE any
             // supervisor/watchdog so it can never reverse this button push.
             exterminateSupervisors();
@@ -2882,6 +2973,7 @@ async function runAllNoBrainPass() {
       {
         const fairFloor = c.asset === 'HYPE-USD' ? Math.max(cfg.min_fair || 0.5, 0.58) : (cfg.min_fair || 0.5);
         if (result.fair == null || result.fair < fairFloor) continue;
+        if (result.fair != null && result.fair > (cfg.max_fair != null ? cfg.max_fair : 9.99)) continue; // confidence ceiling
       }
       if (price < (cfg.min_entry_price != null ? cfg.min_entry_price : 0.05)) continue;
       // TOO-GOOD FILTER (same as the deep scanner): every brain loss claimed
@@ -2998,7 +3090,8 @@ async function runAllNoLive() {
     // = positive expectancy. YES-TWIN rows carry their own cap.
     const minFair = cfg.min_fair || 0.65;
     const sideCap = r.side === 'YES' ? (cfg.max_yes_price != null ? cfg.max_yes_price : 0.35) : (cfg.max_no_price || 0.32);
-    if (r.fair < minFair || r.limit_entry > sideCap) continue;
+      const maxFair = cfg.max_fair != null ? cfg.max_fair : 9.99;
+      if (r.fair < minFair || r.fair > maxFair || r.limit_entry > sideCap) continue;
     // CONVICTION PRESS: one position per market unless the settled-trade
     // record for this (asset, price bucket) is verified >=80% wins - then a
     // second add is earned from facts, not brain confidence.

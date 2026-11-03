@@ -150,6 +150,7 @@ async function raw(acctName, method, route, opts) {
 //   read:   GET    /portfolio/orders/{order_id}
 // ---------------------------------------------------------------------------
 async function placeOrderV2(body) {
+  if (global.__KAI_TRADE_BLOCKED) { const e = new Error('TRADE BLOCKED: safe mode'); e.code = 'KAI_SAFE_MODE'; throw e; }
   return raw('live', 'POST', '/portfolio/events/orders', { body });
 }
 async function cancelOrderV2(orderId, marketTicker) {
