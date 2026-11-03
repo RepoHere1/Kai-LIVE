@@ -50,6 +50,9 @@ try {
   process.on('exit', (code) => APPEND(new Date().toISOString() + ' EXIT code=' + code));
   process.on('SIGTERM', () => { APPEND(new Date().toISOString() + ' SIGTERM'); process.exit(143); });
   process.on('SIGINT', () => { APPEND(new Date().toISOString() + ' SIGINT'); process.exit(130); });
+  // LAST WORDS: even a /F kill or power loss leaves the final alive-stamp -
+  // the gap between last words and the next boot IS the exact time of death.
+  setInterval(() => { try { APPEND(new Date().toISOString() + ' ALIVE uptime=' + Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000) + 's'); } catch (e) {} }, 30000);
 } catch (e) { console.error('crash witness init failed', e.message); }
 
 const ENV = kalshi.ENV;
