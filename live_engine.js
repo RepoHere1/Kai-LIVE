@@ -372,6 +372,9 @@ function pendingExposure() {
 
   // ---- entries -------------------------------------------------------------------------------
   async function openEntry(lane, q, side, price, fair, edge, sigma) {
+    // EDGE TRUTH: some callers (deep-value pass) used to pass edge=null, so the
+    // tape printed edge=0 on real orders. Derive it instead of lying.
+    if (edge == null && fair != null) edge = Number((fair - Number(price)).toFixed(4));
     const s = st();
     const ls = laneState(lane.name);
     if (pendingEntries().some((o) => o.lane === lane.name && o.ticker === q.ticker)) {

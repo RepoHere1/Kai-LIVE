@@ -1782,7 +1782,7 @@ function getAllNoBook(sideFilter) {
       quantity: p.quantity,
       cost: Number(safeNum(p.cost).toFixed(2)),
       entry_fair: p.fair_at_entry || 0.5,
-      edge: Number((p.edge_at_entry || 0).toFixed(3)),
+      edge: (p.edge_at_entry != null ? Number(p.edge_at_entry.toFixed(3)) : (p.fair_at_entry != null && p.entry_price != null ? Number((p.fair_at_entry - p.entry_price).toFixed(4)) : 0)),
       kelly: Number(safeNum(p.kelly != null ? p.kelly : p.kelly_fraction).toFixed(3)),
       stop_loss: p.stop_loss,
       take_profit: p.take_profit,
@@ -3045,7 +3045,8 @@ function syncAllNoView() {
   const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
   book.positions = open.map(p => ({
     id: p.id, market_id: p.market_id, side: p.side || 'NO', entry_price: p.entry_price,
-    quantity: p.qty, cost: p.cost, fair_at_entry: p.fair_at_entry, edge: p.edge_at_entry,
+    quantity: p.qty, cost: p.cost, fair_at_entry: p.fair_at_entry,
+    edge: (p.edge_at_entry != null ? p.edge_at_entry : (p.fair_at_entry != null && p.entry_price != null ? Number((p.fair_at_entry - p.entry_price).toFixed(4)) : null)),
     kelly: 0, stop_loss: p.stop_loss, take_profit: p.take_profit, confidence: 0,
     expiration: p.close_time, status: 'resting', opened_at: p.opened, mark: p.mark || p.entry_price, pnl: 0,
   }));

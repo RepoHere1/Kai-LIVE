@@ -1,4 +1,4 @@
-﻿# KAI TAPE (DRY book) - event-driven terminal feed. Silent until something
+# KAI TAPE (DRY book) - event-driven terminal feed. Silent until something
 # happens: entries, closes, balance moves, server restarts. A PULSE line
 # every 5 minutes proves the heart is beating. Run:  .\tape.ps1
 $ErrorActionPreference = 'SilentlyContinue'
@@ -45,7 +45,7 @@ while ($true) {
     foreach ($p in @($nb.open_rows)) {
       if (-not $knownOpen[$p.id]) {
         $knownOpen[$p.id] = $true
-        Line 'Yellow' ("ENTER {0} {1} in={2} qty={3} fair={4} edge={5}" -f $p.market_id, $p.side, $p.entry_price, $p.quantity, $p.entry_fair, $p.edge)
+        Line 'Yellow' ("ENTER {0} {1} in={2} qty={3} fair={4} edge={5}" -f $p.market_id, $p.side, $p.entry_price, $p.quantity, $p.entry_fair, [Math]::Round([double]$p.edge, 4))
       }
     }
     foreach ($t in @($nb.closed_rows)) {
