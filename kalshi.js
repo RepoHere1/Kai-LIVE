@@ -120,7 +120,10 @@ async function raw(acctName, method, route, opts) {
     if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
     let r;
     try {
-      r = await fetch(url, init);
+      // TIMEOUT GUARD: a stalled TCP connection used to hang this promise
+      // FOREVER (undici has no default body/head timeout). One hung call froze
+      // the whole lane tick chain - the 'stale HYPE heartbeat' incident.
+      r = await fetch(url, Object.assign({}, init, { signal: AbortSignal.timeout(15000) }));
     } catch (e) {
       throw new Error('network: ' + e.message);
     }

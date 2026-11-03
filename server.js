@@ -631,8 +631,8 @@ function defaultState() {
     min_price: 0.02,
     take_profit: 0.90,
     stop_loss: 0.25,
-    // Trail stop OFF: a trailing exit gave back winners (LIVE: 15 trail exits would have settled +$30 more held). Hard stop_loss stays ON.
-    trail_stop: false,
+    // TRAIL STOP EXTERMINATED (operator law): trail exits sold 86.7%-
+    // would-be-settled winners; the code is DELETED, not gated.
     kelly_cap: 0.5,
     min_hold_sec: 15,
     entry_cooldown_sec: 30,
@@ -1361,8 +1361,7 @@ async function markLivePositions() {
       const heldMs = Date.now() - new Date(pos.opened).getTime();
       if (heldMs < Number(state.runtime.min_hold_sec || 45) * 1000) continue;
 
-      // High-water mark for the trailing stop.
-      if (bid != null && bid > (pos.hwm != null ? pos.hwm : pos.entry_price)) pos.hwm = bid;
+      // (No high-water tracking: the trail stop it fed is exterminated.)
 
       // Time-decay exit at 80% of contract lifetime - LOSERS ONLY.
       // Winners (bid > entry) ride to settlement for the full $1 payout.
@@ -1370,14 +1369,8 @@ async function markLivePositions() {
       const lifePct = totalLifeMs > 0 ? heldMs / totalLifeMs : 1;
       if (lifePct > 0.8 && bid != null && bid <= pos.entry_price) { await LO.exitPosition(pos, bid, 'time_decay'); continue; }
 
-      // Trailing stop: arm only after a real move (max(4c, full edge)) and
-      // then give back only a QUARTER of the peak gain. The old 50% lock cut
-      // winners at 0.57 that were ridden toward settlement.
-      const trailArmed = (pos.hwm != null ? pos.hwm : pos.entry_price) >= pos.entry_price + Math.max(0.04, (pos.edge_at_entry || 0));
-      if (state.runtime.trail_stop === true && trailArmed && bid != null) {
-        const trailStop = pos.entry_price + ((pos.hwm != null ? pos.hwm : bid) - pos.entry_price) * 0.75;
-        if (bid <= trailStop) { await LO.exitPosition(pos, bid, 'trail_stop'); continue; }
-      }
+      // TRAIL STOP: DELETED. The hard stop and take-profit below are the
+      // only price exits; winners ride to settlement.
 
       if (bid != null && bid >= pos.take_profit) await LO.exitPosition(pos, bid, 'take_profit');
       else if (bid != null && bid <= pos.stop_loss) await LO.exitPosition(pos, bid, 'stop_loss');
@@ -2918,7 +2911,14 @@ async function runAllNoBrainPass() {
 
 
 async function runAllNoEngine() {
-  if (state.mode === 'live') { await runAllNoLive(); await runAllNoBrainPass(); return; } // ALL NO places real orders in LIVE
+  if (state.mode === 'live') {
+    // live-mode scanner-alive truth: /api/strategies heartbeat was only
+    // written by the paper path, so the LIVE all_no card looked dead while
+    // posting real orders (stale-HYPE audit, 2026-11-02).
+    const hls = laneState('all_no_markets');
+    if (hls) { hls.heartbeat = new Date().toISOString(); hls.last_tick = hls.heartbeat; }
+    await runAllNoLive(); await runAllNoBrainPass(); return;
+  }
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
   if (!noLs || !noLs.running) return;
@@ -3244,9 +3244,19 @@ async function boot() {
   // Account data: kalshi_stream.js (WebSocket). Quotes: read per engine tick.
 
   // Main engine tick - evaluates all lanes every 2 seconds
-  setInterval(async () => {
-    try { await engineTick(); } catch (e) { console.error('[engineTick] Error:', e.message); }
-  }, 2000);
+  // TICK GUARD + DEADLINE (stale-HYPE incident): a hung network await used to
+  // freeze this interval's async body forever, freezing EVERY lane behind it.
+  // Now: (a) one tick in flight at a time, (b) the interval body never waits on
+  // a stalled tick - a 90s deadline abandons it and the loop keeps its cadence.
+  var tickBusy = false;
+  function runTick() {
+    if (tickBusy) return;
+    tickBusy = true;
+    Promise.race([engineTick(), new Promise(r => setTimeout(r, 90000))])
+      .catch(e => console.error('[engineTick] Error:', e.message))
+      .finally(() => { tickBusy = false; });
+  }
+  setInterval(runTick, 2000);
 
   server.listen(PORT, HOST, () => {
     console.log('Kai-LIVE (LIVE) listening on http://' + HOST + ':' + PORT + '/');

@@ -28,6 +28,7 @@ function modelChain(requested) {
 async function chatOnce(base, model, body) {
   const url = base.replace(/\/+$/, '') + '/chat/completions';
   const r = await fetch(url, {
+    signal: AbortSignal.timeout(20000), // TIMEOUT GUARD: a hung LLM fetch stalled the lane tick forever
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (ENV.KILO_TOKEN || '') },
     body: JSON.stringify(body),

@@ -50,7 +50,7 @@ const COLD_PER_COIN = 6;  // cold series rotated round-robin
 const cache = {};            // kind -> { at, series, ticker, close_time, tau_sec, fresh } | { at, series: null }
 const seriesCache = new Map(); // series -> { at, markets }
 const coinState = {};        // coin -> { catalog: [...], at, rr: index }
-let catalogInFlight = null;
+const catalogInFlight = {};  // coin -> in-flight Promise (per-coin, shared)
 
 // Boot-safe defaults before the first catalog lands: the historically hot books.
 const BOOT_DEFAULTS = {
@@ -63,10 +63,13 @@ const BOOT_DEFAULTS = {
 async function refreshCatalog(coin) {
   const st = coinState[coin];
   if (st && st.catalog && Date.now() - st.at < CATALOG_TTL_MS) return st.catalog;
-  if (catalogInFlight) { try { await catalogInFlight; } catch (e) {} }
+  // COMBAT GUARDS (stale-HYPE incident): the catalog promise is per-COIN
+  // now (one shared slot meant one hung /series starved every family), and
+  // the await races a hard 25s deadline -> BOOT_DEFAULTS, never a freeze.
+  if (catalogInFlight[coin]) { try { await catalogInFlight[coin]; } catch (e) {} }
   let list = [];
   try {
-    catalogInFlight = (async () => {
+    const inflight = (async () => {
       const out = [];
       let cursor = '';
       for (let page = 0; page < 3; page++) {
@@ -80,9 +83,13 @@ async function refreshCatalog(coin) {
       }
       return out;
     })();
-    list = await catalogInFlight;
+    catalogInFlight[coin] = inflight;
+    list = await Promise.race([
+      inflight,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('catalog deadline 25s')), 25000)),
+    ]);
   } catch (e) { list = []; }
-  finally { catalogInFlight = null; }
+  finally { if (catalogInFlight[coin]) delete catalogInFlight[coin]; }
 
   if (!list.length) {
     const prior = st && st.catalog;

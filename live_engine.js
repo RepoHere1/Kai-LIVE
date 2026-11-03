@@ -65,6 +65,9 @@ function create(deps) {
       bal.error = null;
     } catch (e) {
       bal.error = String(e.message || e).slice(0, 240);
+      bal.at = Date.now(); // FAILURE also counts as an attempt: staleness math must
+      // treat a 429 as 'just tried'. Without this, refreshIfStale/watcher saw age=
+      // Infinity and ping-ponged the throttle into a 400+-reads-per-minute storm.
       log('live_balance_error', { error: bal.error });
       // No restore: a failed read means cash is UNKNOWN. Sizing must refuse rather than trade
       // on stale money. The last good value stays in state.live.last_balance for the page,
