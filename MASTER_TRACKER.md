@@ -321,4 +321,40 @@ stats that let this call be re-verified.
 
 **Monitoring gaps noticed (not fixed):** in live mode the all_no lane
 heartbeat/last_skip are only written by the DRY code path (stale ages shown on
-/api/strategies); lanes skip last_tick when they have no quotable market.
+/api/strategies); lanes skip last_tick when they have no quotable market.---
+
+## 2026-11-03 THE STALE-HYPE INCIDENT: FROZEN LANE LOOP - FULL AUTOPSY + FIXES
+
+Symptom: /api/strategies heartbeats stuck for days on eth_1h/xrp_1h/HYPE lanes
+while the server 'looked healthy'. Truth: the 2s lane tick ran exactly ONCE per
+restart and never again. It was NEVER about Kalshi rotating HYPE ids -
+series_kind v3 finds HYPE books fine (KXHYPE15M discovered, evaluating, real
+skip reasons like 'probability floor (0.30 < 0.65)').
+
+Root cause (a family of unbounded awaits in the tick's serial path):
+  1. kalshi.js raw(): fetch() WITHOUT timeout - Node's fetch can wait forever
+     on a stalled connection. One hung quote froze every lane behind it.
+     -> AbortSignal.timeout(15s) (also in DRY).
+  2. series_kind refreshCatalog: single SHARED in-flight catalog promise - one
+     hung /series starved all 4 coin families. -> per-coin slot + 25s race
+     deadline -> BOOT_DEFAULTS fallback (also in DRY).
+  3. engineTick ran unguarded in a 2s interval body: any hung await blocked
+     the loop forever. -> runTick wrapper: one tick in flight + 90s deadline.
+  4. kilo.js chatOnce: LLM fetch un-timed. -> 20s AbortSignal (also in DRY).
+  5. LIVE all_no scan cadence: state.runtime.all_no had NO scan_interval_ms ->
+     setInterval(fn, undefined) fired ~every 1ms = request storm -> Kalshi 429s
+     saturated the THROTTLE queue -> ticks starved. scan_interval_ms=10000 set
+     via /api/config (RUNTIME - lives in state.json).
+  6. live_engine balance: bal.at only stamped on SUCCESS -> refreshIfStale saw
+     age=Infinity forever and ping-ponged the engine backoff at Kalshi's rate
+     limit (~4x/min sustained). bal.at now stamps on every ATTEMPT.
+
+Also in this package: TRAIL STOP EXTERMINATED (code deleted in LIVE+DRY -
+trailArmed/trailStop/pos.hwm/trail_pct/runtime.trail_stop are gone; winners
+ride to settlement; hard stop_loss + take_profit + time_decay remain), and
+live-mode all_no heartbeat/last_tick written honestly.
+
+EVIDENCE THE CURE WORKS (00:37Z): all 9 lanes ticking 2s-cadence with real
+skip reasons; live_balance recovered; all_no scanning at 10s cadence; real
+in-band orders placed (e.g. NO 0.58 cap 0.65). NOTE: DRY and LIVE share the
+live Kalshi key's rate-limit pool - see recommendations.
