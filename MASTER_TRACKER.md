@@ -387,3 +387,44 @@ CASH: the tape's BAL/ACCT +- moves are settlements/fills of the ledger,
 not mystery losses. Watch: capital now ties up until settlement (max 4
 concurrent by design). Re-audit hold-vs-realized tonight to confirm the
 bleed flipped; the 67.9% win number needs n>=100 in-band to be trusted.
+
+---
+
+## 2026-11-03 THE REAL REASON FOR THE LOSSES: THE MODEL WAS SELLING A FAKE EDGE
+
+Calibration of claimed fair vs ACTUAL Kalshi settlement (LIVE trades):
+  claimed fair 0.50-0.55  n=11  actual win 36.4%  (model 15 pts overconfident)
+  claimed fair 0.55-0.60  n=8   actual win  0.0%  (pure fiction)
+  claimed fair 0.60-0.65  n=13  actual win 69.2%  (honest)
+  claimed fair 0.65-0.70  n=60  actual win 61.7%  (honest)
+  claimed fair 0.70-0.80  n=38  actual win 71.1%  (honest)
+The cheap entries on the tape (in=0.39 fair=0.55) live in the zone where the
+gaussian digital model is demonstrably wrong. min_fair 0.58 let them through.
+
+P&L BY PRICE PAID (settled trades, LIVE's real fee 1.15c/contract, held to settle):
+  p<.40    n=19  win 21.1% vs 31.5% breakeven -> -$25.69   <- ALL OF THE LOSS
+  .40-.50  n=16  win 50.0% vs 46.3%            ->  +$5.19
+  .50-.60  n=39  win 71.8% vs 55.4%            -> +$43.99
+  .60-.70  n=5   win 80.0% vs 61.1%            ->  +$5.66
+LIVE lifetime -$29.46; the sub-40c population alone was -$25.69 of it.
+Everything bought above 45c has been positive.
+
+GATE CHOSEN BY COUNTERFACTUAL (hold-to-settle, real fees, LIVE history):
+  NOW  .45/.65 fair>=.58 edge<=.18  n=70  win 67.1%  +$47.78
+  G    .50/.70 fair>=.62 edge<=.30  n=85  win 70.6%  +$61.28   <- APPLIED
+Applied via POST /api/config (RUNTIME - lives in state.json, not git):
+  min_entry_price 0.50, max_no_price 0.70, max_yes_price 0.70,
+  min_fair 0.62, max_edge 0.30, brain_max_price 0.70
+
+WHY DRY LOOKED PROFITABLE WHILE LIVE LOST - two structural lies in the lab:
+  1) FEES. DRY booked 1.75% of exit proceeds only (avg 0.60c/contract). LIVE
+     actually pays 1.15c/contract; Kalshi's rule is 0.07*p*(1-p) per contract
+     on BOTH legs. FIXED in Kai-Mirror (entry + exit legs, real formula).
+  2) FILL REALISM. The paper book credits every resting bid as filled. Real
+     post-only bids fill mostly on adverse moves - which is why LIVE's cheap
+     entries won 21% while DRY's won 51% in the SAME band. NOT modelled yet;
+     it is the next honesty fix for the lab.
+
+STATUS: LIVE gate live (floor .50 caps .70 fair .62), 0 open positions,
+crash.log witnessing on both servers (it recorded DRY's 04:09 restart).
+n=85 is still small - this gate is evidence-backed, not a promise.
