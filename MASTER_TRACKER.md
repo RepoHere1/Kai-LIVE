@@ -566,3 +566,37 @@ MEASURED AFTER THE CHANGE: the good facts are all `kalshi:ws` with ages of
 books and stale books are refused by name. The engine did not stop trading:
 DRY maker intents kept advancing, which is the proof that the gate refuses
 BAD data without refusing the good stuff.
+
+## 2026-11-03 WATCHDOG/KCTL v4 - the recovery loop was BLIND
+
+The v2/v3 watchdog looked responsible but could not do its one job. Its
+liveness test opened an async TCP connect and treated "the wait handle did
+not signal within 2s" as ALIVE. On Windows a REFUSED loopback connect does NOT
+signal that handle either (the fault only becomes visible when you call
+EndConnect), so a dead server was reported as "slow but alive" - forever.
+Verified on this machine: with DRY hard-killed, the v3 watchdog logged
+"mirror=up" every minute for ten minutes. The same bug lived in kctl, so
+every stop fell through to the FORCE path - it even reported "graceful
+shutdown did not respond" when the graceful shutdown had worked. Force-kill
+is what tore state files and disarmed the machine.
+
+v4:
+  * DEAD means an explicit ConnectionRefused (SocketErrorCode). A timeout, a
+    slow answer or any unknown error means ALIVE - a slow server is NEVER
+    killed. That keeps the "do not kill healthy servers" promise without
+    blinding the watchdog.
+  * HEARTBEAT every pass, so "it did nothing" can never be confused with "it
+    never ran".
+  * kctl starts the server DETACHED via Win32_Process.Create, so the new
+    server cannot die with the shell that launched it, and kai.pid records the
+    real NODE pid.
+
+PROOF (controlled failure test, this machine, 2026-11-03):
+  02:08:51  DRY hard-killed (SIGKILL: no shutdown, no crash.log exit line)
+  02:15:57  watchdog v4: mirror CONNECTION REFUSED (strike 1/2)
+  02:17:00  watchdog v4: mirror CONNECTION REFUSED (strike 2/2)
+  02:17:02  watchdog v4: confirmed down - issuing GRACEFUL restart
+  02:17:28  watchdog v4: mirror restart issued
+  DRY back: boots=28, safe_mode=False, source=primary, ALL 9 LANES RUNNING and
+  every risk gate intact (floor 0.50, caps 0.70, fair floor 0.62, edge 0.30,
+  clip 3) - a hard death no longer disarms the machine.

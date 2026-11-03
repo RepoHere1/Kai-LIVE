@@ -40,6 +40,8 @@ function Test-PortListening([int]$Port) {
 }
 
 $strikes = @{ 'mirror' = 0; 'live' = 0 }
+$up = @{ 'mirror' = $false; 'live' = $false }
+$tick = 0
 $lastRestart = @{ 'mirror' = (Get-Date).AddMinutes(-10); 'live' = (Get-Date).AddMinutes(-10) }
 
 while ($true) {
@@ -48,8 +50,10 @@ while ($true) {
     if (Test-PortListening $port) {
       if ($strikes[$srv] -gt 0) { WLog "$srv port listening again - strikes cleared" }
       $strikes[$srv] = 0
+      $up[$srv] = $true
       continue
     }
+    $up[$srv] = $false
     $strikes[$srv] = $strikes[$srv] + 1
     WLog "$srv port REFUSED (strike $($strikes[$srv])/2)"
     if ($strikes[$srv] -lt 2) { continue }
@@ -61,5 +65,10 @@ while ($true) {
     $strikes[$srv] = 0
     WLog "$srv restart issued"
   }
+  # HEARTBEAT: a watchdog that cannot prove it is alive is a watchdog nobody
+  # can trust. Every pass states what it saw, so "it did nothing" and "it never
+  # ran" can never be confused again.
+  $tick += 1
+  WLog ("heartbeat #{0} mirror={1} live={2} strikes=({3}/{4})" -f $tick, $(if ($up['mirror']) {'up'} else {'DOWN'}), $(if ($up['live']) {'up'} else {'DOWN'}), $strikes['mirror'], $strikes['live'])
   Start-Sleep -Seconds 60
 }
