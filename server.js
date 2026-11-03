@@ -41,6 +41,17 @@ const { KalshiWS } = require('./kalshi_ws');
 const { CoinbaseWS } = require('./coinbase_ws');
 
 const HERE = __dirname;
+// CRASH WITNESS (2026-11-03): a silent death looked like 'LIVE loves to fail'.
+// Every exit path now stamps crash.log BEFORE the process goes away.
+try {
+  const APPEND = (line) => fs.appendFileSync(path.join(HERE, 'crash.log'), line + String.fromCharCode(10));
+  process.on('uncaughtException', (e) => { APPEND(new Date().toISOString() + ' UNCAUGHT ' + (e && e.stack ? e.stack : e)); process.exit(1); });
+  process.on('unhandledRejection', (r) => APPEND(new Date().toISOString() + ' REJECTION ' + (r && r.stack ? r.stack : String(r))));
+  process.on('exit', (code) => APPEND(new Date().toISOString() + ' EXIT code=' + code));
+  process.on('SIGTERM', () => { APPEND(new Date().toISOString() + ' SIGTERM'); process.exit(143); });
+  process.on('SIGINT', () => { APPEND(new Date().toISOString() + ' SIGINT'); process.exit(130); });
+} catch (e) { console.error('crash witness init failed', e.message); }
+
 const ENV = kalshi.ENV;
 const PORT = Number(ENV.PORT || 8788);  // LIVE server: port 8788
 const HOST = '127.0.0.1';
@@ -1367,13 +1378,17 @@ async function markLivePositions() {
       // Winners (bid > entry) ride to settlement for the full $1 payout.
       const totalLifeMs = new Date(q.close_time).getTime() - new Date(pos.opened).getTime();
       const lifePct = totalLifeMs > 0 ? heldMs / totalLifeMs : 1;
-      if (lifePct > 0.8 && bid != null && bid <= pos.entry_price) { await LO.exitPosition(pos, bid, 'time_decay'); continue; }
+      if (lifePct > 0.9 && bid != null && bid <= pos.entry_price * 0.95) { await LO.exitPosition(pos, bid, 'time_decay'); continue; }
 
       // TRAIL STOP: DELETED. The hard stop and take-profit below are the
       // only price exits; winners ride to settlement.
 
+      // ALL NO band positions ride to settlement (2026-11-03 exit autopsy):
+      // fee-adjusted hold EV was +$48 vs realized -$31; the -20% stop cut
+      // 68%-winners on mid-life noise. Only a -70% disaster floor exits early.
+      const bandDisaster = pos.strategy === 'all_no_markets' ? Number((pos.entry_price * 0.30).toFixed(3)) : null;
       if (bid != null && bid >= pos.take_profit) await LO.exitPosition(pos, bid, 'take_profit');
-      else if (bid != null && bid <= pos.stop_loss) await LO.exitPosition(pos, bid, 'stop_loss');
+      else if (bandDisaster != null ? bid <= bandDisaster : (bid != null && bid <= pos.stop_loss)) await LO.exitPosition(pos, bid, 'stop_loss');
     }
   }
 }
