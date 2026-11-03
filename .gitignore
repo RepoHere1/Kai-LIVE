@@ -1,7 +1,16 @@
-.env
+﻿.env
 node_modules/
 *.log
 *.err
 *.pid
 state.json
 .DS_Store
+state.backup.json
+state.json.tmp
+state.json.golden
+server.log
+server.err
+server.log.prev
+server.err.prev
+facts.db
+facts.db-journal

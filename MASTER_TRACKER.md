@@ -518,3 +518,51 @@ TESTED by deliberately corrupting state.json: it recovered from the backup with
 all 9 lanes and all gates intact (source=backup); with BOTH copies destroyed it
 came up in safe_mode with trading blocked (source=none) instead of trading on
 defaults - and it stayed up for inspection rather than vanishing.
+
+## 2026-11-03 DATA FACTS LAYER (verdict before action + evidence ledger)
+
+THE LIE IT KILLS: a quote payload is a mash of fields fetched at different
+moments - a STATIC REST market record plus a live book that arrives separately
+over the WebSocket - and the model then adds a probability on top. When those
+pieces disagreed, nothing told the machine, so it traded anyway. Worse, the
+stream layer silently fell back to the static REST snapshot whenever the live
+tick was older than FRESH_MS: that is how stale prices reached the engine.
+
+THE PERMANENT FIX (both repos):
+  * data_facts.js verifies EVERY observation before the machine may act on it,
+    and REFUSES it if it fails:
+      CONSISTENT  yes_bid + no_ask <= 1+tick and no_bid + yes_ask <= 1+tick.
+                  A violation proves the payload mixes two different snapshots.
+      PRICED      every price inside the exchange band. Dead ladder strikes
+                  (0 / 0.01) are refused, not treated as a 0 price.
+      PRINTED     a last print AND a volume must both exist, with the SOURCE
+                  recorded: a print off the live tape beats a REST snapshot.
+      SPREAD      the touch is neither zero-width nor absurdly wide.
+      SKEW        the YES-implied mid and the NO-implied mid must agree.
+      FRESH       measured against the LIVE tick, not against the static
+                  market record: no live tick for 15s, or an unchanged REST
+                  book for over 2 minutes, is stale and refused.
+  * quote_stream.js now overlays the LATEST known book even when the tick is
+    old (the REST record is static, so the newest tick is strictly better
+    information) and stamps live_tick_at / live_print / live_volume onto the
+    quote. The real trade-tape print now also reaches q.last, so the fill
+    simulator proves fills against tape prints rather than a REST snapshot.
+  * The verdict is made AT THE MOMENT OF THE DECISION, on exactly the prices
+    that would be traded: the scanner re-applies the live book and re-verifies
+    before it considers a market. A verdict computed at fetch time and used
+    30s later is not a verdict, it is a rumour.
+  * Every observation is written to facts.db with its source, timestamp and
+    verdict, so any decision can be replayed later: "what did the machine
+    actually know when it clicked?".
+  * New endpoints: /api/data-health (verdict counts, refusal reasons, live
+    coverage) and /api/facts?minutes=N (the ledger itself).
+  * The market-implied probability (the mid of the REAL touch) is exported as
+    implied_yes - the only probability that is a fact rather than a model
+    output, and the anchor the machine must be measured against.
+
+MEASURED AFTER THE CHANGE: the good facts are all `kalshi:ws` with ages of
+0.4-1.6 SECONDS (real live books: BTC 0.72/0.73, ETH 0.66/0.67, XRP
+0.60/0.61, HYPE 0.36/0.37 with real volume), while dead ladders, zero-width
+books and stale books are refused by name. The engine did not stop trading:
+DRY maker intents kept advancing, which is the proof that the gate refuses
+BAD data without refusing the good stuff.

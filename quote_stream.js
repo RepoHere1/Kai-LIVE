@@ -96,16 +96,24 @@ function onMessage(data) {
 function apply(q) {
   if (!q) return q;
   const t = quotes.get(q.ticker);
-  if (t && Date.now() - t.at < FRESH_MS) {
+  // Overlay the LATEST known book even if the tick is old: the REST market
+  // record is static, so the newest tick is strictly better information than
+  // the snapshot. Whether it is FRESH ENOUGH to trade on is decided by the
+  // facts layer (age_ms), not silently here - a silent fallback to the static
+  // snapshot is exactly how stale prices used to reach the engine.
+  if (t) {
     if (t.yes_bid != null) q.yes_bid = t.yes_bid;
     if (t.yes_ask != null) q.yes_ask = t.yes_ask;
     if (t.no_bid != null) q.no_bid = t.no_bid;
     if (t.no_ask != null) q.no_ask = t.no_ask;
-    if (t.last != null) q.last_price = t.last;
+    if (t.last != null) { q.last = t.last; q.last_price = t.last; }   // the REAL trade-tape print wins over the static REST snapshot
     if (t.volume != null) q.volume = t.volume;
     q.updated = new Date(t.at).toISOString();
+    q.live_tick_at = t.at;          // when the book we are looking at was actually printed
+    q.live_print = t.last;          // the print itself, straight off the tape
+    q.live_volume = t.volume;
   }
   return q;
 }
 
-module.exports = { start, stop, setMarkets, note, apply, freshCount: () => quotes.size };
+module.exports = { start, stop, setMarkets, note, apply, freshCount: () => quotes.size, FRESH_MS };

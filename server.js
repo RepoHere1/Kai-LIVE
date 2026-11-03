@@ -37,10 +37,14 @@ const brain = require('./brain_live');
 const series_kind = require('./series_kind');
 const conviction = require('./conviction');
 const quote_stream = require('./quote_stream');
+const dataFacts = require('./data_facts');
 const { KalshiWS } = require('./kalshi_ws');
 const { CoinbaseWS } = require('./coinbase_ws');
 
 const HERE = __dirname;
+// DATA FACTS LAYER: every observation is verified and recorded before anybody
+// is allowed to act on it. /api/data-health and /api/facts expose the ledger.
+const FACTS = dataFacts.create({ dbPath: path.join(HERE, 'facts.db'), liveCount: () => { try { return quote_stream.freshCount(); } catch (e) { return null; } }, log: (k, o) => { try { log(k, o); } catch (e) { } } });
 // CRASH WITNESS (2026-11-03). A silent death looked like "LIVE loves to fail".
 // Registered at the very TOP of the module so even a failure during boot is
 // captured. Every line carries the PID, and the exit handler captures the CALL
@@ -1013,7 +1017,7 @@ function normCdf(x) {
 function quoteFromMarket(m) {
   if (!m) return null;
   const num = v => (v == null || v === '' ? null : Number(v));
-  return {
+  const q = {
     ticker: m.ticker,
     event: m.event_ticker,
     title: m.title,
@@ -1040,6 +1044,25 @@ function quoteFromMarket(m) {
     sub_title: m.yes_sub_title || m.sub_title || '',
     updated: m.updated_time,
   };
+  // VERDICT BEFORE ACTION. This observation is now a recorded fact with a
+  // verdict; anything that fails verification is refused by the entry path.
+  q.observed_at = Date.now();
+  q.mkt_updated = m.updated_time;
+  return q;
+}
+
+// VERDICT BEFORE ACTION. This is called AFTER the live WebSocket book has been
+// overlaid on the quote, so the verdict is made on the prices the machine would
+// actually trade - not on the static REST snapshot it started from.
+function recordFact(q) {
+  if (!q) return q;
+  const v = FACTS.observe(q, { source: 'kalshi' });
+  q.facts_ok = v.ok;
+  q.facts_verdict = v.verdict;
+  q.implied_yes = v.implied_yes;
+  q.facts_basis = v.basis;
+  q.facts_age_ms = v.age_ms;
+  return q;
 }
 
 // Options chain cache - full chain per series (8 depths) for cross-expiry/term structure
@@ -1056,7 +1079,7 @@ async function fetchOptionsChain(series) {
     const ms = ((r.data && r.data.markets) || []).map(quoteFromMarket);
     // Sort by strike for easy access
     ms.sort((a, b) => (a.strike || 0) - (b.strike || 0));
-    for (const q of ms) quote_stream.apply(q);
+    for (const q of ms) recordFact(quote_stream.apply(q));
     const out = { at: Date.now(), markets: ms, source: r.source, host: r.host, ms: r.ms, fetched_at: r.at };
     optionsChainCache.set(key, out);
     return out;
@@ -1075,7 +1098,7 @@ async function marketsForSeries(series, limit) {
     const r = await kalshi.get('/markets', { query: { limit: limit || 5, status: 'open', series_ticker: series }, ttlMs: 1500 });
     const ms = ((r.data && r.data.markets) || []).map(quoteFromMarket);
     quote_stream.note(ms);
-    for (const q of ms) quote_stream.apply(q);
+    for (const q of ms) recordFact(quote_stream.apply(q));
     const out = { at: Date.now(), markets: ms, source: r.source, host: r.host, ms: r.ms, fetched_at: r.at };
     marketCache.set(key, out);
     return out;
@@ -1182,7 +1205,7 @@ async function quoteForTicker(ticker) {
   try {
     const r = await kalshi.get('/markets/' + ticker, { ttlMs: 2000 });
     const m = r.data && r.data.market;
-    return quote_stream.apply(quoteFromMarket(m));
+    return recordFact(quote_stream.apply(quoteFromMarket(m)));
   } catch (e) { return null; }
 }
 
@@ -1920,6 +1943,9 @@ async function noBook() {
   for (const s of allSeries) {
     const res = await marketsForSeries(s, 12); // deeper scan
     for (const q of res.markets || []) {
+      // Refresh the book and re-verify AT THE MOMENT OF THE DECISION, so the
+      // verdict covers exactly the prices that would be traded.
+      recordFact(quote_stream.apply(q));
       if (q.status === 'finalized' || q.result) continue;
       if (!q.strike || !q.close_time) continue;
       
@@ -1941,6 +1967,7 @@ async function noBook() {
       // Use REAL market quotes - no synthetic fallbacks
       const no_bid = q.no_bid;
       const no_ask = q.no_ask;
+      if (q.facts_ok === false) continue;   // DATA INTEGRITY: payload failed verification
       if (!no_bid || !no_ask || no_bid <= 0.02 || no_ask >= 0.98) continue;
       
       const spread = no_ask - no_bid;
@@ -2370,6 +2397,12 @@ async function handle(req, res) {
     });
   }
 
+  if (p === '/api/data-health') return json(res, FACTS.health());
+  if (p === '/api/facts') {
+    const mm = /[?&]minutes=(\d+)/.exec(req.url || '');
+    const rows = await FACTS.recent(mm ? Number(mm[1]) : 10, 300);
+    return json(res, { count: rows.length, rows });
+  }
   if (p === '/api/shutdown' && method === 'POST') {
     // GRACEFUL STOP. The watchdog and kctl call this FIRST so state is flushed
     // atomically before the process goes away. A force kill (taskkill /F) is
