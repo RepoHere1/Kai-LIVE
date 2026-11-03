@@ -1213,7 +1213,8 @@ async function openLivePosition(lane, q, side, price, fair, edge, sigma) {
 //   SCALE: effectiveClip() also scales with equity growth (base * equity/baseline).
 // Call noteClipOutcome(pnl) on EVERY booked trade.
 function noteClipOutcome(pnl) {
-  const cs = state.clip_state || (state.clip_state = { base: 3, max: 25, ratchet_until: 0 });
+  // SIZE GOVERNOR (2026-11-03, operator-ordered): ceiling == base, so win streaks cannot grow the clip.
+  const cs = state.clip_state || (state.clip_state = { base: 1.5, max: 1.5, ratchet_until: 0 });
   if (pnl > 0) {
     cs.win_streak = (cs.win_streak || 0) + 1;
     if (cs.win_streak % 3 === 0 && cs.base < cs.max) {
@@ -1259,7 +1260,7 @@ function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
   if (pnl > 0) ls.wins++; else {
   ls.losses++; ls.loss_cooldown_until = Date.now() + (state.runtime.loss_cooldown_sec || 600) * 1000;
   if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
-    state.clip_state = state.clip_state || { base: 3, max: 25, ratchet_until: 0 };
+    state.clip_state = state.clip_state || { base: 1.5, max: 1.5, ratchet_until: 0 };
     state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
     log('clip_ratchet', { pnl, baseline: state.live.starting_balance || 10 });
   }
@@ -1326,7 +1327,7 @@ function closeLivePosition(pos, exitPrice, reason, result) {
   if (pnl > 0) ls.wins++; else {
   ls.losses++; ls.loss_cooldown_until = Date.now() + (state.runtime.loss_cooldown_sec || 600) * 1000;
   if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
-    state.clip_state = state.clip_state || { base: 3, max: 25, ratchet_until: 0 };
+    state.clip_state = state.clip_state || { base: 1.5, max: 1.5, ratchet_until: 0 };
     state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
     log('clip_ratchet', { pnl, baseline: state.live.starting_balance || 10 });
   }

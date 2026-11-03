@@ -245,7 +245,8 @@ function create(deps) {
 
     function effectiveClip() {
     const s = st();
-    const cs = s.clip_state || (s.clip_state = { base: 3, max: 25, ratchet_until: 0 });
+    // SIZE GOVERNOR (2026-11-03, operator-ordered): ceiling == base, so win streaks cannot grow the clip.
+    const cs = s.clip_state || (s.clip_state = { base: 1.5, max: 1.5, ratchet_until: 0 });
     if (cs.ratchet_until && Date.now() < cs.ratchet_until) return cs.base;
     const equity = (bal.cash || 0) + pendingExposure();
     const baseline = (s.live && s.live.starting_balance) || 10;
