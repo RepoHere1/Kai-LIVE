@@ -358,3 +358,32 @@ EVIDENCE THE CURE WORKS (00:37Z): all 9 lanes ticking 2s-cadence with real
 skip reasons; live_balance recovered; all_no scanning at 10s cadence; real
 in-band orders placed (e.g. NO 0.58 cap 0.65). NOTE: DRY and LIVE share the
 live Kalshi key's rate-limit pool - see recommendations.
+---
+
+## 2026-11-03 'LIVE LOVES TO FAIL' AUTOPSY (the exits, the deaths, the cash)
+
+1) THE EXITS ATE THE EDGE. Fee-adjusted re-scoring of the SAME in-band entries
+(0.44-0.66, 56 settled): win rate 67.9%, hold-to-settle EV +$48.06, realized
+-$30.64. The -20% stop cut 69 band trades; 21 of them settled as WINNERS.
+FIX (code, pushed): ALL NO positions now ride to settlement - take_profit
+stays ~0.95, stop fires only at a -70% disaster floor (entry x 0.30),
+time-decay only past 90% of life AND bid < 0.95x entry. Verified live: one
+YES 0.62 -> mark 0.919 riding with no stop interference.
+
+2) THE DEATHS WERE NOT SPONTANEOUS. 14 boots in the ring line up with the
+session's intentional restarts; a taskkill /F death leaves NO handler output
+and the old stderr is overwritten on relaunch (the silent-death mechanism).
+FIX (code, both repos): crash.log witness - uncaughtException / unhandled
+rejection / exit / SIGTERM / SIGINT stamped before death, plus a 30s
+'ALIVE uptime=Ns' last-words heartbeat. Time of death = last ALIVE stamp.
+Verified: crash.log ticking on both servers.
+
+3) DRY NEVER TOUCHED THE LIVE KEY - audit: its 'live_balance' is dryCash().
+(My earlier warning was wrong; corrected here.) The balance-429 loop was
+LIVE's own (attempt-stamp fix, pushed). tape.ps1's DOWN line can fire on a
+single failed health probe - crash.log is now the ground truth for death.
+
+CASH: the tape's BAL/ACCT +- moves are settlements/fills of the ledger,
+not mystery losses. Watch: capital now ties up until settlement (max 4
+concurrent by design). Re-audit hold-vs-realized tonight to confirm the
+bleed flipped; the 67.9% win number needs n>=100 in-band to be trusted.
