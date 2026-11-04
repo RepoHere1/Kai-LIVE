@@ -13,4 +13,9 @@ server.err
 server.log.prev
 server.err.prev
 facts.db
+trading.db
+trading.db-journal
+trading.db-wal
+trading.db-shm
+
 facts.db-journal
