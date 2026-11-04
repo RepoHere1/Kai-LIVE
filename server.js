@@ -2159,7 +2159,13 @@ async function noBook() {
         if (e > (anCfg.max_edge != null ? anCfg.max_edge : 0.18)) return;
         const kelly = Math.max(0, e / (1 - bid));
         const kellyCapped = Math.min(0.25, kelly);          // cap at 25% Kelly
-        const q2 = Math.max(1, Math.floor(5 * kellyCapped / Math.max(0.01, bid)));
+        // OPERATOR ORDER 2026-11-04: ≤ $0.50 in the dry-book rows too (the LIVE
+        // money path already clamps inside openEntry; this keeps the books
+        // honest and matches Mirror). Skip when no contract fits - never force.
+        // server.js has no effectiveClip() (the engine owns clip state in its
+        // create() closure), so the $0.50 operator cap is applied directly.
+        const qBudget = Math.min(0.50, 5 * kellyCapped);
+        const q2 = Math.floor(qBudget / Math.max(0.01, bid));
         if (q2 < 1) return;
         rows.push({
           id: q.ticker,
