@@ -246,7 +246,7 @@ function Do-Start {
   # HIDDEN launch: a visible console window flashing on every watchdog restart
   # is what the operator saw as "blank PowerShell windows". The server is a
   # background service - it must never own a console.
-  $proc = Start-Process -FilePath $Node -ArgumentList 'server.js' -WorkingDirectory $C.Dir `
+  $proc = Start-Process -FilePath $Node -ArgumentList '--max-old-space-size=256','server.js' -WorkingDirectory $C.Dir `
     -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $C.Dir 'server.log') `
     -RedirectStandardError  (Join-Path $C.Dir 'server.err')
