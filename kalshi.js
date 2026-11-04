@@ -101,7 +101,10 @@ function buildUrl(acct, route, query) {
 async function raw(acctName, method, route, opts) {
   opts = opts || {};
   const acct = accounts[acctName];
-  if (!acct || !acct.keyId || !acct.pem) throw new Error('no credentials for ' + acctName);
+    if (!acct || !acct.base) throw new Error('no account config for ' + acctName);
+    // Public market-data reads need no credentials; only signed routes do.
+    const isPublicRoute = method === 'GET' && /^(\/markets|\/series|\/events|\/calendar|\/exchange|\/tags)/.test(route);
+    if (!isPublicRoute && (!acct.keyId || !acct.pem)) throw new Error('no credentials for ' + acctName);
   const query = Object.assign({}, opts.query || {});
   const qs = Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : '';
   const url = acct.base + route + qs;
@@ -109,7 +112,17 @@ async function raw(acctName, method, route, opts) {
   let lastErr = null;
   for (let attempt = 0; attempt < 4; attempt++) {
     const ts = Math.floor(Date.now() / 1000).toString();
-    const headers = {
+    // 2026-11-04: Kalshi market data (/markets, /series, /events...) is PUBLIC -
+    // unsigned GETs return 200 (verified live: 311-597ms). Signing these GETs
+    // with the LIVE key married every quote to that key's 429 penalty: the
+    // server's own scan load tripped constant 429 retry-storms, series_kind
+    // sweeps serialized into minutes, and every lane past #1 starved inside the
+    // 90s tick budget (frozen since 2026-11-03 09:33). Public reads carry no key
+    // throttle; /portfolio/* (balance, orders) stays signed.
+    const isPublicRead = method === 'GET' && /^(\/markets|\/series|\/events|\/calendar|\/exchange|\/tags)/.test(route);
+    const headers = isPublicRead ? {
+      'Accept': 'application/json',
+    } : {
       'KALSHI-ACCESS-KEY': acct.keyId,
       'KALSHI-ACCESS-SIGNATURE': sign(acct, method, pathNoQuery, ts, 'pss'),
       'KALSHI-ACCESS-TIMESTAMP': ts,

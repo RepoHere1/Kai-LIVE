@@ -72,8 +72,8 @@ async function refreshCatalog(coin) {
     const inflight = (async () => {
       const out = [];
       let cursor = '';
-      for (let page = 0; page < 3; page++) {
-        const query = { limit: 1000, category: 'Crypto' };
+      for (let page = 0; page < 2; page++) {
+        const query = { limit: 200, category: 'Crypto' };
         if (cursor) query.cursor = cursor;
         const d = await kalshi.raw('dry', 'GET', '/series', { query });
         const ss = (d && d.series) || [];

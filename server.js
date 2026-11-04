@@ -1240,7 +1240,17 @@ function syntheticQuote(q, fair) {
 
 async function activeQuote(lane) {
     const staticSeries = (lane.seriesList || [lane.series]).filter(Boolean);
-  const discSeries = await series_kind.resolveFresh(lane.name);
+  // 2026-11-04 STARVATION KILL: in-process, series_kind sweeps can crawl for
+  // minutes under the scanner load - and resolveFresh awaited them with NO
+  // deadline, freezing every lane past #1 inside the 90s tick budget (lanes
+  // 2-8 dead since 2026-11-03 09:33). The engine now races discovery with a
+  // 4s deadline and falls through to the static series list, which is what
+  // the lanes were named for in the first place. Discovery is a bonus, never
+  // a gate.
+  const discSeries = await Promise.race([
+    series_kind.resolveFresh(lane.name),
+    new Promise((r) => setTimeout(() => r(null), 4000)),
+  ]);
   if (discSeries && !staticSeries.includes(discSeries.series)) staticSeries.push(discSeries.series);
   for (const series of staticSeries) {
     // 2026-11-04: Kalshi's default /markets sort returns the TOP strikes of a
