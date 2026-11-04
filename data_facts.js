@@ -123,13 +123,24 @@ function create(deps) {
       const sqlite3 = require('sqlite3').verbose();
       db = new sqlite3.Database(dbPath, (e) => {
         if (e) { log('facts', { error: 'db_open_failed', detail: e.message }); db = null; return; }
+        // busyTimeout: a blocked writer WAITS for the lock instead of failing.
+        db.configure('busyTimeout', 5000);
         // sqlite3 reports async failures as an 'error' EVENT. Without this
         // handler an async error becomes an uncaught exception and kills the
         // server - the ledger must never be able to do that.
         db.on('error', (err) => { log('facts', { error: 'db_error', detail: err && err.message }); });
         db.run('CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY, ts INTEGER, ticker TEXT, verdict TEXT, reasons TEXT, yes_bid REAL, yes_ask REAL, no_bid REAL, no_ask REAL, last_px REAL, volume REAL, implied_yes REAL, age_ms INTEGER, source TEXT)', (ce) => {
           if (ce) { log('facts', { error: 'create_table_failed', detail: ce.message }); return; }
-          db.run('CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)', (ie) => { ready = true; });
+          db.run('CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)', (ie) => {
+            // THE CERTAINTY LEDGER: every candidate the lane saw, the
+            // probability it claimed, and - once the market settles - whether
+            // it was right. The lane measures its own win rate from here
+            // instead of asserting one.
+            db.run('CREATE TABLE IF NOT EXISTS cert (id INTEGER PRIMARY KEY, ts INTEGER, ticker TEXT, side TEXT, prob REAL, price REAL, fee REAL, margin REAL, tau INTEGER, z REAL, asset TEXT, traded INTEGER, reason TEXT, settled INTEGER DEFAULT 0, won INTEGER, pnl REAL)', (ce2) => {
+              if (ce2) { log('facts', { error: 'create_cert_table_failed', detail: ce2.message }); return; }
+              db.run('CREATE INDEX IF NOT EXISTS idx_cert_ticker ON cert(ticker, ts)', (ie2) => { ready = true; });
+            });
+          });
         });
       });
     }
@@ -140,20 +151,22 @@ function create(deps) {
     const rows = buf; buf = [];
     try {
       const stmt = db.prepare('INSERT INTO facts (ts,ticker,verdict,reasons,yes_bid,yes_ask,no_bid,no_ask,last_px,volume,implied_yes,age_ms,source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+      stmt.on('error', (se) => { log('facts', { error: 'facts_stmt_error', detail: se && se.message }); });
       for (const r of rows) {
-        stmt.run(r.ts, r.ticker, r.verdict, r.reasons, r.yes_bid, r.yes_ask, r.no_bid, r.no_ask, r.last_px, r.volume, r.implied_yes, r.age_ms, r.source);
+        stmt.run(r.ts, r.ticker, r.verdict, r.reasons, r.yes_bid, r.yes_ask, r.no_bid, r.no_ask, r.last_px, r.volume, r.implied_yes, r.age_ms, r.source, (re) => { if (re) log('facts', { error: 'insert_row_failed', detail: re.message }); });
       }
       stmt.finalize((fe) => { if (fe) log('facts', { error: 'insert_failed', detail: fe.message }); });
     } catch (e) { /* the ledger must never break trading */ }
   }
 
   if (db) {
-    const t = setInterval(flush, 2000);
+    const t = setInterval(() => { flush(); flushCert(); }, 2000);
     if (t.unref) t.unref();
     const prune = setInterval(() => {
       try {
         db.run('DELETE FROM facts WHERE ts < ?', [Date.now() - LEDGER_MAX_AGE_MS], () => {});
         db.run('DELETE FROM facts WHERE id < (SELECT MAX(id) - ? FROM facts)', [LEDGER_MAX_ROWS], () => {});
+        db.run('DELETE FROM cert WHERE ts < ?', [Date.now() - LEDGER_MAX_AGE_MS], () => {});
       } catch (e) { }
     }, 300000);
     if (prune.unref) prune.unref();
@@ -207,7 +220,95 @@ function create(deps) {
     });
   }
 
-  return { observe, health, recent, verify, flush };
+  // ---------------------------------------------------------------------------
+  // THE CERTAINTY LEDGER
+  // ---------------------------------------------------------------------------
+  // A candidate is written the moment the lane sees it - traded or refused.
+  // A refused candidate that would have won is as informative as one we took,
+  // so both are kept, and both are settled when the market finalises.
+  const certBuf = [];
+  // PRE-READY QUEUE (2026-11-04): the ledger opens asynchronously, and the lane
+  // can record a candidate before the schema is ready. The old code returned
+  // early there and SILENTLY DROPPED the row - a ledger that loses rows at boot
+  // cannot prove a win rate. Now the row is kept in certBuf (capped) and written
+  // as soon as the table exists. Only a closed or failed DB discards.
+  function certaintyRecord(c) {
+    if (!c || !c.ticker) return;
+    if (!db) return;
+    certBuf.push({
+      ts: Date.now(), ticker: String(c.ticker), side: c.side || null,
+      prob: n(c.prob), price: n(c.price), fee: n(c.fee), margin: n(c.margin),
+      tau: c.tau != null ? Math.round(Number(c.tau)) : null, z: n(c.z),
+      asset: c.asset || null, traded: c.traded ? 1 : 0, reason: c.reason || '',
+    });
+    if (certBuf.length > 5000) certBuf.splice(0, certBuf.length - 5000);
+    if (ready && certBuf.length > 100) flushCert();
+  }
+  function flushCert() {
+    if (!db || !ready || !certBuf.length) return;
+    const rows = certBuf.splice(0, certBuf.length);
+    try {
+      const stmt = db.prepare('INSERT INTO cert (ts,ticker,side,prob,price,fee,margin,tau,z,asset,traded,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+      stmt.on('error', (se) => { log('facts', { error: 'cert_stmt_error', detail: se && se.message }); });
+      for (const r of rows) {
+        stmt.run(r.ts, r.ticker, r.side, r.prob, r.price, r.fee, r.margin, r.tau, r.z, r.asset, r.traded, r.reason, (re) => { if (re) log('facts', { error: 'cert_row_failed', detail: re.message }); });
+      }
+      stmt.finalize((fe) => { if (fe) log('facts', { error: 'cert_insert_failed', detail: fe.message }); });
+    } catch (e) { /* the ledger must never break trading */ }
+  }
+  function certaintyOutcome(o) {
+    if (!db || !ready || !o || !o.ticker) return;
+    try {
+      db.run('UPDATE cert SET settled=1, won=?, pnl=? WHERE id=(SELECT id FROM cert WHERE ticker=? AND settled=0 AND traded=1 ORDER BY id DESC LIMIT 1)',
+        [o.won ? 1 : 0, n(o.pnl), String(o.ticker)], (e) => { if (e) log('facts', { error: 'cert_settle_failed', detail: e.message }); });
+    } catch (e) { }
+  }
+  function certaintyStats() {
+    return new Promise((resolve) => {
+      const empty = { candidates: 0, traded: 0, settled: 0, wins: 0, win_rate: null, avg_prob: null, avg_price: null, calibration_gap: null, pnl: null, by_side: {}, buckets: {}, recent: [] };
+      if (!db || !ready) return resolve(empty);
+      db.all('SELECT ts,ticker,side,prob,price,fee,margin,tau,z,asset,traded,reason,settled,won,pnl FROM cert ORDER BY id DESC LIMIT 5000', (e, rows) => {
+        if (e || !rows) return resolve(empty);
+        const settled = rows.filter(r => r.settled);
+        const wins = settled.filter(r => r.won).length;
+        const avgProb = settled.length ? settled.reduce((a, r) => a + (Number(r.prob) || 0), 0) / settled.length : null;
+        const avgPrice = settled.length ? settled.reduce((a, r) => a + (Number(r.price) || 0), 0) / settled.length : null;
+        const bySide = {};
+        for (const r of settled) {
+          const k = r.side || 'NA';
+          const b = bySide[k] || (bySide[k] = { n: 0, wins: 0, pnl: 0 });
+          b.n++; if (r.won) b.wins++; b.pnl += Number(r.pnl) || 0;
+        }
+        for (const k of Object.keys(bySide)) bySide[k].win_rate = Number((bySide[k].wins / bySide[k].n).toFixed(4));
+        const buckets = {};
+        for (const r of settled) {
+          const p = Number(r.prob) || 0;
+          const key = p >= 0.97 ? '0.97+' : p >= 0.94 ? '0.94-0.97' : p >= 0.90 ? '0.90-0.94' : 'below';
+          const b = buckets[key] || (buckets[key] = { n: 0, wins: 0, pnl: 0 });
+          b.n++; if (r.won) b.wins++; b.pnl += Number(r.pnl) || 0;
+        }
+        for (const k of Object.keys(buckets)) buckets[k].win_rate = Number((buckets[k].wins / buckets[k].n).toFixed(4));
+        resolve({
+          candidates: rows.length,
+          traded: rows.filter(r => r.traded).length,
+          settled: settled.length,
+          wins,
+          losses: settled.length - wins,
+          win_rate: settled.length ? Number((wins / settled.length).toFixed(4)) : null,
+          avg_prob: avgProb == null ? null : Number(avgProb.toFixed(4)),
+          avg_price: avgPrice == null ? null : Number(avgPrice.toFixed(4)),
+          // calibration_gap > 0 means the model was OPTIMISTIC.
+          calibration_gap: settled.length ? Number((avgProb - wins / settled.length).toFixed(4)) : null,
+          pnl: Number(settled.reduce((a, r) => a + (Number(r.pnl) || 0), 0).toFixed(4)),
+          by_side: bySide,
+          buckets,
+          recent: rows.slice(0, 20),
+        });
+      });
+    });
+  }
+
+  return { observe, health, recent, verify, flush, certaintyRecord, certaintyOutcome, certaintyStats, flushCert };
 }
 
 module.exports = { create, verify };

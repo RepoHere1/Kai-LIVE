@@ -19,21 +19,30 @@
 #      force kill only if the server refuses to exit.
 #   6. It NEVER touches lane flags. The operator's button push is law.
 $mtx = New-Object System.Threading.Mutex($false, 'Global\KaiWatchdog')
-if (-not $mtx.WaitOne(0)) { exit 1 }   # another watchdog already owns the job
-$Kctl = 'C:\Users\darri\AppData\Local\Temp\opencode\kctl.ps1'
-$Log  = 'C:\Users\darri\AppData\Local\Temp\opencode\watchdog.log'
+$acquired = $false
+try { $acquired = $mtx.WaitOne(0) }
+catch [System.Threading.AbandonedMutexException] { $acquired = $true }   # previous owner was killed: we own it now
+if (-not $acquired) { exit 1 }   # another watchdog already owns the job
+# STABLE PATHS (v3 - 2026-11-03). The watchdog used to live in
+# %TEMP%\opencode, which Windows may clean at any time and which no version
+# control covers. A watchdog that vanishes on a temp cleanup stops healing the
+# trading server. Both scripts now live in the REPOSITORY.
+$Kctl = Join-Path $PSScriptRoot 'kctl.ps1'
+$Log  = Join-Path $PSScriptRoot 'watchdog.log'
 function WLog([string]$m) { Add-Content -Path $Log -Value ("{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }
-WLog 'watchdog v2 started (graceful stop, slow-safe health, 2-strike, 5min cooldown)'
+WLog 'watchdog v3 started (repo-stable scripts, ownership-safe pids, graceful recovery)'
 
 function Test-PortListening([int]$Port) {
   $c = New-Object System.Net.Sockets.TcpClient
   try {
-    $iar = $c.BeginConnect('127.0.0.1', $Port, $null, $null)
-    if (-not $iar.AsyncWaitHandle.WaitOne(2000)) { return $true }   # slow/filtered: assume alive
-    $c.EndConnect($iar)
-    return $true                                                     # connected: alive
+    # SYNCHRONOUS connect: success = alive; ConnectionRefused = really down.
+    $c.Connect('127.0.0.1', $Port)
+    return $true
   } catch {
-    return $false                                                    # refused: really down
+    $ex = $_.Exception
+    if ($ex.InnerException) { $ex = $ex.InnerException }
+    if ($ex -is [System.Net.Sockets.SocketException]) { return ($ex.SocketErrorCode -ne 'ConnectionRefused') }
+    return $true
   } finally {
     try { $c.Close() } catch { }
   }
@@ -60,7 +69,13 @@ while ($true) {
     $mins = ((Get-Date) - $lastRestart[$srv]).TotalMinutes
     if ($mins -lt 5) { WLog "$srv cooldown $([int]$mins)m - restart skipped"; continue }
     WLog "$srv confirmed down - issuing GRACEFUL restart"
-    try { & powershell -NoProfile -ExecutionPolicy Bypass -File $Kctl $srv restart 2>$null | Out-Null } catch { }
+    # HIDDEN child: a nested PowerShell inherits a VISIBLE console window and
+    # flashes an empty black rectangle on every restart. The operator saw
+    # exactly that. Start it hidden and wait for it to finish.
+    try {
+      $null = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -Wait -PassThru `
+        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $Kctl, $srv, 'restart'
+    } catch { WLog "$srv restart launch failed: $($_.Exception.Message)" }
     $lastRestart[$srv] = Get-Date
     $strikes[$srv] = 0
     WLog "$srv restart issued"

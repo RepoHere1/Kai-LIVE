@@ -43,7 +43,7 @@ function create(deps) {
   const pendingEntries = () => orders().filter((o) => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling'));
 
   // ---- balance: REST, only when something moved --------------------------------------------
-  const bal = { at: 0, cash: null, breakdown: [], portfolio_value: null, error: null };
+  const bal = { at: 0, cash: null, cash_at: 0, breakdown: [], portfolio_value: null, error: null, backoff_ms: 150 * 1000 };
   let balInflight = null;
   let balTimer = null;
   let balDirty = false;
@@ -57,6 +57,8 @@ function create(deps) {
       bal.breakdown = (b.balance_breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) }));
       bal.portfolio_value = num(b.portfolio_value_dollars) ?? (num(b.portfolio_value) != null ? num(b.portfolio_value) / 100 : null);
       bal.at = Date.now();
+      bal.cash_at = Date.now();       // the read that produced this cash
+      bal.backoff_ms = 150 * 1000;    // a successful read resets the backoff
       const s = st();
       if (s.live) {
         s.live.last_balance = { cash: bal.cash, breakdown: bal.breakdown, portfolio_value: bal.portfolio_value, at: bal.at };
@@ -74,10 +76,13 @@ function create(deps) {
       // which flags it as STALE (429). Removing this restore fixed oversized orders that used
       // the old $12.64 number while the real account had less.
       if (/429/.test(bal.error)) {
-        // Longer backoff: a 60s retry ping-ponged with other pollers at the
-        // rate limit and sustained the 429 loop indefinitely.
-        bal.backoff_until = Date.now() + 150 * 1000;
-        setTimeout(() => scheduleBalance(), 150 * 1000 + 500);
+        // EXPONENTIAL backoff. A 60s retry ping-ponged with other pollers at
+        // the rate limit and sustained the 429 loop indefinitely. 150 -> 300
+        // -> 600s (capped). A rate-limited read is cheap; a starved engine
+        // that never trades is not.
+        bal.backoff_ms = Math.min(600 * 1000, (bal.backoff_ms || 150 * 1000) * 2);
+        bal.backoff_until = Date.now() + bal.backoff_ms;
+        setTimeout(() => scheduleBalance(), bal.backoff_ms + 500);
       }
     }
     return bal;
@@ -97,6 +102,31 @@ function create(deps) {
       await readBalance();
       if (balDirty) { balDirty = false; scheduleBalance(); }
     }, wait);
+  }
+
+  // ---- usable cash ---------------------------------------------------------------------------
+  // THE 429 STARVATION (2026-11-03): the boot balance read was rate limited,
+  // bal.cash stayed null for the whole process, and EVERY entry path does
+  // "cash <= 0 -> refuse". The machine sat there doing nothing and the
+  // dashboard showed a cash number from a persisted snapshot. The fix is not
+  // to trust a stale number blindly - it is to know HOW OLD the number is and
+  // to bound every order by an absolute dollar cap so a stale figure can
+  // never produce an oversized bet.
+  const CASH_TRUST_MS = 20 * 60 * 1000;   // a cash figure older than this is not money
+  function usableCash() {
+    const now = Date.now();
+    if (bal.cash != null) {
+      const age = bal.cash_at ? now - bal.cash_at : null;
+      return { cash: bal.cash, stale: age == null || age > CASH_TRUST_MS, age_ms: age, source: 'live_read' };
+    }
+    // Nothing read in this process: fall back to the last CONFIRMED cash, but
+    // only inside the trust window, and only as a STALE figure.
+    const s = st();
+    const lb = s.live && s.live.last_balance;
+    if (lb && lb.cash != null && lb.at && now - lb.at <= CASH_TRUST_MS) {
+      return { cash: lb.cash, stale: true, age_ms: now - lb.at, source: 'persisted' };
+    }
+    return null;
   }
 
   // ---- event-contract positions and resting orders: REST at boot and on reconnect ----------
@@ -248,7 +278,8 @@ function create(deps) {
     // SIZE GOVERNOR (2026-11-03, operator-ordered): ceiling == base, so win streaks cannot grow the clip.
     const cs = s.clip_state || (s.clip_state = { base: 1.5, max: 1.5, ratchet_until: 0 });
     if (cs.ratchet_until && Date.now() < cs.ratchet_until) return cs.base;
-    const equity = (bal.cash || 0) + pendingExposure();
+    const uc = usableCash();
+    const equity = (uc ? uc.cash : 0) + pendingExposure();
     const baseline = (s.live && s.live.starting_balance) || 10;
     const target = Math.round(cs.base * Math.max(1, equity / baseline));
     return Math.max(cs.base, Math.min(cs.max, target));
@@ -351,9 +382,12 @@ function pendingExposure() {
         bid_at_entry: rec.meta.bid_at_entry,
         ask_at_entry: rec.meta.ask_at_entry,
         entry_price: Number(entry.toFixed(4)),
-        stop_loss: Number((entry * (1 - s.runtime.stop_loss)).toFixed(3)),
-        // Winners ride to settlement: take profit only near-certainty (0.95).
-        take_profit: Number(Math.min(0.98, 0.95).toFixed(3)),
+        stop_loss: rec.lane === 'certainty' ? null : Number((entry * (1 - s.runtime.stop_loss)).toFixed(3)),
+        // TAKE PROFIT IS DEAD (operator order, 2026-11-03): no take_profit on
+        // any position. A winner rides to settlement - no exit fee, full
+        // $1.00 payout. The certainty lane has no stop either: one contract,
+        // and the whole thesis is that the outcome is already decided.
+        take_profit: null,
         mark: Number(entry.toFixed(4)),
         qty: 0,
         cost: 0,
@@ -372,7 +406,7 @@ function pendingExposure() {
   }
 
   // ---- entries -------------------------------------------------------------------------------
-  async function openEntry(lane, q, side, price, fair, edge, sigma) {
+  async function openEntry(lane, q, side, price, fair, edge, sigma, opts) {
     // EDGE TRUTH: some callers (deep-value pass) used to pass edge=null, so the
     // tape printed edge=0 on real orders. Derive it instead of lying.
     if (edge == null && fair != null) edge = Number((fair - Number(price)).toFixed(4));
@@ -388,7 +422,8 @@ function pendingExposure() {
       ls.skips++; ls.last_skip = 'price outside 0.01-0.99: ' + px;
       return null;
     }
-    if (bal.cash == null) {
+    const uc = usableCash();
+    if (!uc || !(uc.cash > 0)) {
       ls.skips++; ls.last_skip = 'live cash unavailable: ' + (bal.error || 'no balance read yet');
       return null;
     }
@@ -399,14 +434,18 @@ function pendingExposure() {
     // cash (default 25%). Evidence: a clip-scaled $11.55 entry on a $24
     // account (47%) - the heat gates only count OPEN positions, so the first
     // entry after a win could bet anything. This bounds it, always.
-    const posCap = Math.max(0.5, (bal.cash || 0) * ((st().runtime && st().runtime.max_position_pct) || 0.25));
-    const budget = Math.min(effectiveClip(), usable, posCap);
+    const posCap = Math.max(0.5, uc.cash * ((st().runtime && st().runtime.max_position_pct) || 0.25));
+    // ABSOLUTE ORDER CAP: a stale cash figure must NEVER produce a big bet.
+    // This is what makes the stale-cash fallback safe.
+    const hardCap = (st().runtime && st().runtime.max_order_dollars) || 2.00;
+    const budget = Math.min(effectiveClip(), usable, posCap, hardCap);
     // PRICE-AWARE CLIP: the clip is a DOLLAR budget sized for normal prices
     // (~25c+). At 5c a dollar budget buys hundreds of lottery tickets and one
     // wrong model call wipes the whole clip (evidence: -$16 settled on a 0.05
     // entry). Cap contracts as if the clip were spent at a 25c reference.
     const qtyCap = Math.max(1, Math.ceil(effectiveClip() / 0.25));
-    const qty = Math.min(Math.floor(budget / px), qtyCap);
+    let qty = Math.min(Math.floor(budget / px), qtyCap);
+    if (opts && opts.maxQty) qty = Math.min(qty, Math.max(1, Math.floor(opts.maxQty)));
     if (!(qty >= 1)) {
       ls.skips++; ls.last_skip = 'insufficient live cash for shard ' + target + ' ($' + usable.toFixed(2) + ' usable, 1 contract = $' + px.toFixed(2) + ')';
       return null;
@@ -419,14 +458,19 @@ function pendingExposure() {
       return null;
     }
     const yesPrice = side === 'YES' ? px : Number((1 - px).toFixed(2));
+    // TAKER MODE (certainty lane): near expiry a maker order may never fill,
+    // and if it fills in the final seconds you have paid 95c for a coin flip.
+    // The certainty lane pays the ASK and takes liquidity: post_only off,
+    // immediate_or_cancel so the remainder dies instead of resting.
+    const taker = !!(opts && opts.taker);
     const body = {
       ticker: q.ticker,
       client_order_id: crypto.randomUUID(),
       side: side === 'YES' ? 'bid' : 'ask',
       count: qty.toFixed(2),
       price: yesPrice.toFixed(2),
-      time_in_force: 'good_till_canceled',
-      post_only: true,
+      time_in_force: taker ? 'immediate_or_cancel' : 'good_till_canceled',
+      post_only: !taker,
       self_trade_prevention_type: 'taker_at_cross',
       subaccount: 0,
     };
@@ -461,7 +505,7 @@ function pendingExposure() {
     ls.entries++;
     ls.heartbeat = isoNow();
     ls.last_series = q.series;
-    log('live_order_placed', { lane: lane.name, ticker: q.ticker, side, price: px, qty, shard: target, order_id: rec.order_id, post_only: true });
+    log('live_order_placed', { lane: lane.name, ticker: q.ticker, side, price: px, qty, shard: target, order_id: rec.order_id, post_only: !taker, taker, stale_cash: !!(uc && uc.stale) });
     broadcast('strategy', lane.name + ' order ' + side + ' ' + q.ticker + ' ' + qty + '@' + px);
     save();
     const immediate = num(resp.fill_count) || 0;
@@ -543,6 +587,12 @@ function pendingExposure() {
     snapshot,
     kalshiView,
     cash: () => bal.cash,
+    // THE 429 STARVATION FIX: the server asks for cash it can actually trust,
+    // with its age attached, instead of a number that may be null (starved)
+    // or silently stale.
+    usableCash,
+    cashAgeMs: () => (bal.cash_at ? Date.now() - bal.cash_at : null),
+    cashError: () => bal.error,
     pendingExposure,
     refreshIfStale: async () => { if (Date.now() - bal.at > BALANCE_RECONCILE_MS) scheduleBalance(); },
     refreshSnapshot: readBalance,

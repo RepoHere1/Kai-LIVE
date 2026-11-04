@@ -5,7 +5,6 @@
     "min_edge": 0.015,
     "max_price": 0.6,
     "min_price": 0.05,
-    "take_profit": 0.9,
     "stop_loss": 0.2,
     "max_exposure_pct": 0.5,
     "all_no": {
@@ -28,6 +27,25 @@
       "max_tau_sec": 2100,
       "max_hold_pct": 0.85,
       "allow_yes": true
+    },
+    "certainty": {
+      "_comment": "HIGH WIN RATE LANE. Win rate is bought with PRICE, not with confidence: a contract paying 95c needs a 95% win rate to break even. This lane only trades contracts whose outcome is already decided by the passage of time - near expiry, strike far from spot - and prices the probability PESSIMISTICALLY (widened vol, index basis haircut, empirical tail). It measures its own win rate in the certainty ledger. OFF until an operator turns it on.",
+      "enabled": false,
+      "min_prob": 0.95,
+      "max_price": 0.97,
+      "min_margin": 0.02,
+      "min_tau_sec": 20,
+      "max_tau_sec": 300,
+      "min_z": 4.0,
+      "max_qty": 1,
+      "max_concurrent": 2,
+      "cooldown_ms": 120000,
+      "vol_multiplier": 1.8,
+      "basis_pct": 0.0001,
+      "fee_rate": 0.07,
+      "fee_floor": 0.005,
+      "settle_window_sec": 60,
+      "require_empirical": true
     }
   }
 }
