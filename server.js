@@ -635,11 +635,11 @@ const LANES = [
   { name: 'btc_updown', label: 'BTC 15-Min Up/Down', series: 'KXBTC15M', seriesList: ['KXBTC15M'], spot: 'BTC-USD', asset: 'BTC', horizon: '15m' },
   { name: 'eth_updown', label: 'ETH 15-Min Up/Down', series: 'KXETH15M', seriesList: ['KXETH15M'], spot: 'ETH-USD', asset: 'ETH', horizon: '15m' },
   { name: 'xrp_updown', label: 'XRP 15-Min Up/Down', series: 'KXXRP15M', seriesList: ['KXXRP15M'], spot: 'XRP-USD', asset: 'XRP', horizon: '15m' },
-  { name: 'btc_1h_updown', label: 'BTC Daily Ladder', series: 'KXBTCD', seriesList: ['KXBTCD'], spot: 'BTC-USD', asset: 'BTC', horizon: '1d' },
-  { name: 'eth_1h_updown', label: 'ETH Daily Ladder', series: 'KXETHD', seriesList: ['KXETHD'], spot: 'ETH-USD', asset: 'ETH', horizon: '1d' },
-  { name: 'xrp_1h_updown', label: 'XRP Daily Ladder', series: 'KXXRPD', seriesList: ['KXXRPD'], spot: 'XRP-USD', asset: 'XRP', horizon: '1d' },
+  { name: 'btc_1h_updown', label: 'BTC Daily Ladder', series: 'KXBTCD', seriesList: ['KXBTCD'], spot: 'BTC-USD', asset: 'BTC', horizon: '1d', deep: 80 },
+  { name: 'eth_1h_updown', label: 'ETH Daily Ladder', series: 'KXETHD', seriesList: ['KXETHD'], spot: 'ETH-USD', asset: 'ETH', horizon: '1d', deep: 80 },
+  { name: 'xrp_1h_updown', label: 'XRP Daily Ladder', series: 'KXXRPD', seriesList: ['KXXRPD'], spot: 'XRP-USD', asset: 'XRP', horizon: '1d', deep: 80 },
   { name: 'hyperliquid_updown', label: 'Hyperliquid Up/Down', series: 'KXHYPE15M', seriesList: ['KXHYPE15M'], spot: 'HYPE-USD', asset: 'HYPE', horizon: '15m' },
-  { name: 'hyperliquid_1h_updown', label: 'Hyperliquid 1-Hour', series: 'KXHYPE', seriesList: ['KXHYPE'], spot: 'HYPE-USD', asset: 'HYPE', horizon: '1h' },
+  { name: 'hyperliquid_1h_updown', label: 'Hyperliquid 1-Hour', series: 'KXHYPE', seriesList: ['KXHYPE'], spot: 'HYPE-USD', asset: 'HYPE', horizon: '1h', deep: 80 },
   { name: 'all_no_markets', label: 'ALL NO MARKETS', series: null, seriesList: [], spot: null, asset: null, horizon: 'no-side' },
   { name: 'certainty', label: 'CERTAINTY (near-expiry, 90%+ win rate)', series: null, seriesList: [], spot: null, asset: null, horizon: 'certainty' },
 ];
@@ -750,8 +750,11 @@ function defaultState() {
     runtime: { 
     clip: 5, 
     min_edge: 0.001,
-    max_price: 0.95,
-    min_price: 0.02,
+    // 2026-11-04 EVIDENCE ZONE (operator order, promoted from Mirror): n=1983
+    // closed trades - every entry <0.50 was net positive (+$132), every entry
+    // >=0.50 net negative (-$72). Best zone 0.30-0.49 (+$67.26 on n=635).
+    max_price: 0.50,
+    min_price: 0.30,
     take_profit: null,   // DEAD (operator order, 2026-11-03): winners ride to settlement
     stop_loss: 0.25,
     // TRAIL STOP EXTERMINATED (operator law): trail exits sold 86.7%-
@@ -763,6 +766,11 @@ function defaultState() {
     max_exposure_pct: 0.5,
     // ALL NO MARKETS config
     all_no: {
+      // 2026-11-04 EVIDENCE ZONE (promoted from Mirror): all_no trades ONLY
+      // [0.30, 0.49] on either side - same n=1983 evidence as the lanes.
+      min_entry_price: 0.30,
+      max_no_price: 0.49,
+      max_yes_price: 0.49,
       max_exposure_pct: 0.3,
       max_concurrent: 10,
       min_edge: 0.005,
@@ -786,8 +794,8 @@ maker_only: true
       min_edge: 0.002,
       min_confidence: 0.25,
       entry_cooldown_sec: 45,
-      max_price: 0.85,
-      min_price: 0.10,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.35,
       preferred_signals: ['order_flow', 'vol_rp', 'black_scholes', 'imbalance'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -801,8 +809,8 @@ maker_only: true
       min_edge: 0.0025,
       min_confidence: 0.25,
       entry_cooldown_sec: 60,
-      max_price: 0.85,
-      min_price: 0.10,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.3,
       preferred_signals: ['order_flow', 'funding_carry', 'black_scholes', 'imbalance'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -816,8 +824,8 @@ maker_only: true
       min_edge: 0.003,
       min_confidence: 0.3,
       entry_cooldown_sec: 90,
-      max_price: 0.80,
-      min_price: 0.15,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.25,
       preferred_signals: ['vol_rp', 'term_struct', 'black_scholes', 'imbalance'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -831,8 +839,8 @@ maker_only: true
       min_edge: 0.0015,
       min_confidence: 0.2,
       entry_cooldown_sec: 300,
-      max_price: 0.90,
-      min_price: 0.05,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.4,
       preferred_signals: ['settlement_alpha', 'term_struct', 'black_scholes', 'cross_expiry'],
       regime_avoid: ['arbitrage'],
@@ -845,8 +853,8 @@ maker_only: true
       min_edge: 0.002,
       min_confidence: 0.25,
       entry_cooldown_sec: 300,
-      max_price: 0.90,
-      min_price: 0.05,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.35,
       preferred_signals: ['settlement_alpha', 'funding_carry', 'term_struct', 'black_scholes'],
       regime_avoid: ['arbitrage'],
@@ -859,8 +867,8 @@ maker_only: true
       min_edge: 0.0025,
       min_confidence: 0.3,
       entry_cooldown_sec: 300,
-      max_price: 0.85,
-      min_price: 0.10,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.3,
       preferred_signals: ['settlement_alpha', 'vol_rp', 'term_struct'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -874,8 +882,8 @@ maker_only: true
       min_edge: 0.0035,
       min_confidence: 0.35,
       entry_cooldown_sec: 120,
-      max_price: 0.80,
-      min_price: 0.15,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.2,
       preferred_signals: ['order_flow', 'vol_rp', 'imbalance', 'black_scholes'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -888,8 +896,8 @@ maker_only: true
       min_edge: 0.003,
       min_confidence: 0.3,
       entry_cooldown_sec: 180,
-      max_price: 0.85,
-      min_price: 0.10,
+      max_price: 0.50,
+      min_price: 0.30,
       kelly_cap: 0.25,
       preferred_signals: ['term_struct', 'vol_rp', 'black_scholes'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -902,8 +910,8 @@ maker_only: true
       min_edge: 0.008,
       min_confidence: 0.4,
       entry_cooldown_sec: 15,
-      max_price: 0.95,
-      min_price: 0.02,
+      max_price: 0.49,
+      min_price: 0.30,
       kelly_cap: 0.25,
       preferred_signals: ['black_scholes', 'vol_rp', 'term_struct'],
       regime_avoid: ['wide_spread'],
@@ -1235,7 +1243,12 @@ async function activeQuote(lane) {
   const discSeries = await series_kind.resolveFresh(lane.name);
   if (discSeries && !staticSeries.includes(discSeries.series)) staticSeries.push(discSeries.series);
   for (const series of staticSeries) {
-    const res = await marketsForSeries(series, 8);
+    // 2026-11-04: Kalshi's default /markets sort returns the TOP strikes of a
+    // ladder series first. With limit=8 the engine only ever saw the dead far
+    // strikes (evidence: KXBTCD had 200 open markets, 32 within 2% of spot,
+    // while the engine saw 8 strikes 9% away). Ladder lanes fetch deep so the
+    // fair-value filter can pick the near-spot rung. (Ported from Mirror b8014e1.)
+    const res = await marketsForSeries(series, lane.deep || 8);
     const s = lane.spot ? spot[lane.spot] : null;
     const perSec = s ? perSecondVol(lane.spot, 900) : null;
     const usable = (res.markets || []).filter(m => m.status !== 'finalized' && m.result === '');
@@ -1276,7 +1289,11 @@ async function activeQuote(lane) {
     // bid/ask; the old syntheticQuote refused them, which froze this lane and
     // the brain pass for 78k passes ("no coherent open market").
     const q2 = quote_stream.apply(Object.assign({}, pick));
-    const realBook = q2.yes_ask != null && q2.no_ask != null && q2.yes_bid != null && q2.no_bid != null;
+    // 2026-11-04 (operator order: one-sided books are tradable): we POST maker
+    // at the bid, so a rung with at least ONE real bid is quotable. Demanding
+    // the full four-quote book froze the thin hourly ladders forever - the
+    // entry gates judge each side (a missing side simply can't be traded).
+    const realBook = q2.yes_bid != null || q2.no_bid != null;
     return { 
       quote: realBook ? q2 : null, 
       series, 
@@ -1453,10 +1470,12 @@ function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
   ls.trades++;
   if (pnl > 0) ls.wins++; else {
   ls.losses++; ls.loss_cooldown_until = Date.now() + (state.runtime.loss_cooldown_sec || 600) * 1000;
-  if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
+  if (pnl < 0 && Math.abs(pnl) >= 0.50) {
+    // 2026-11-04 (audit follow-up): replaced 0.25 * persisted starting_balance
+    // with the fixed max-order loss. Sizing triggers must not read snapshots.
     state.clip_state = state.clip_state || { base: 1.5, max: 1.5, ratchet_until: 0 };
     state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
-    log('clip_ratchet', { pnl, baseline: state.live.starting_balance || 10 });
+    log('clip_ratchet', { pnl, trigger: 'fixed $0.50 max-order loss' });
   }
 }
   ls.realized = Number((ls.realized + pnl).toFixed(2));
@@ -1548,10 +1567,12 @@ function closeLivePosition(pos, exitPrice, reason, result) {
   ls.trades++;
   if (pnl > 0) ls.wins++; else {
   ls.losses++; ls.loss_cooldown_until = Date.now() + (state.runtime.loss_cooldown_sec || 600) * 1000;
-  if (pnl < 0 && Math.abs(pnl) >= 0.25 * (state.live.starting_balance || 10)) {
+  if (pnl < 0 && Math.abs(pnl) >= 0.50) {
+    // 2026-11-04 (audit follow-up): replaced 0.25 * persisted starting_balance
+    // with the fixed max-order loss. Sizing triggers must not read snapshots.
     state.clip_state = state.clip_state || { base: 1.5, max: 1.5, ratchet_until: 0 };
     state.clip_state.ratchet_until = Date.now() + 30 * 60 * 1000;
-    log('clip_ratchet', { pnl, baseline: state.live.starting_balance || 10 });
+    log('clip_ratchet', { pnl, trigger: 'fixed $0.50 max-order loss' });
   }
 }
   ls.realized = Number((ls.realized + pnl).toFixed(2));
@@ -2080,7 +2101,10 @@ async function noBook() {
   const allSeries = await getAllTradableSeries();
   
   for (const s of allSeries) {
-    const res = await marketsForSeries(s, 12); // deeper scan
+    // 2026-11-04: same blindness as activeQuote - hourly/daily ladders need a
+    // deep window to see their near-spot rungs (default sort shows top strikes).
+    const deepLadder = /^KX/.test(s) && !/15M$/.test(s);
+    const res = await marketsForSeries(s, deepLadder ? 80 : 12); // deeper scan
     for (const q of res.markets || []) {
       // Refresh the book and re-verify AT THE MOMENT OF THE DECISION, so the
       // verdict covers exactly the prices that would be traded.
@@ -2567,7 +2591,9 @@ async function handle(req, res) {
     return json(res, { ok: true, safe_mode: !!state.safe_mode, state_source: state.state_source || 'primary', boots: state.boot_count || 0, pid: process.pid,
       mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
       hosts: { kalshi_live: kalshi.LIVE_BASE, kalshi_demo: kalshi.DEMO_BASE, spot: 'api.exchange.coinbase.com', llm: ENV.KILO_BASE_URL },
-      credentials: { live_key: kalshi.accounts.live.keyId, demo_key: kalshi.accounts.demo.keyId, llm_token: (ENV.KILO_TOKEN || '').slice(0, 12) + '...' },
+      // 2026-11-04 (audit item, operator order): health NEVER prints raw key
+      // IDs - first 8 chars only. A health endpoint is screenshot-friendly.
+      credentials: { live_key: String(kalshi.accounts.live.keyId || '').slice(0, 8) + '...', demo_key: String(kalshi.accounts.demo.keyId || '').slice(0, 8) + '...', llm_token: (ENV.KILO_TOKEN || '').slice(0, 8) + '...' },
       live_balance: LO.cash(),
       balance_source: LO.balanceSource ? LO.balanceSource() : null,
       balance_age_ms: LO.cashAgeMs ? LO.cashAgeMs() : null,

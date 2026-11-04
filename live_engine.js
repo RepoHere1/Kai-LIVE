@@ -254,9 +254,11 @@ function create(deps) {
     return {
       as_of: bal.at ? new Date(bal.at).toISOString() : null,
       error: bal.error || streamError(),
-      // Display: the last confirmed value when fresh reads are failing, clearly marked STALE.
-      // Sizing NEVER uses this: openEntry reads bal.cash (null) and refuses.
-      cash: bal.cash != null ? bal.cash : ((st().live && st().live.last_balance) ? st().live.last_balance.cash : null),
+      // 2026-11-04 (audit item #1, operator kill order): the persisted
+      // last_balance fallback is DEAD. Unknown cash is null + a stale marker -
+      // a dashboard may never print a number the engine cannot currently prove.
+      // Sizing NEVER used this (openEntry reads bal.cash); display must not lie either.
+      cash: bal.cash,
       balance_stale: bal.cash == null ? (bal.error || 'balance read failed') : null,
       breakdown: bal.breakdown,
       portfolio_value: bal.portfolio_value,
@@ -321,11 +323,11 @@ function create(deps) {
     // SIZE GOVERNOR (2026-11-03, operator-ordered): ceiling == base, so win streaks cannot grow the clip.
     const cs = s.clip_state || (s.clip_state = { base: 1.5, max: 1.5, ratchet_until: 0 });
     if (cs.ratchet_until && Date.now() < cs.ratchet_until) return Math.min(ORDER_MAX_DOLLARS, cs.base);
-    const uc = usableCash();
-    const equity = (uc ? uc.cash : 0) + pendingExposure();
-    const baseline = (s.live && s.live.starting_balance) || 10;
-    const target = Math.round(cs.base * Math.max(1, equity / baseline));
-    return Math.min(ORDER_MAX_DOLLARS, Math.max(cs.base, Math.min(cs.max, target)));
+    // 2026-11-04 (audit item #3, operator kill order): the equity-scaling
+    // baseline `live.starting_balance || 10` was a PERSISTED number - sizing
+    // math must never divide by a snapshot from a past boot. With ceiling ==
+    // base the scaling was already inert; it is now DELETED, not just neutered.
+    return Math.min(ORDER_MAX_DOLLARS, cs.base);
   }
 
 function pendingExposure() {
@@ -458,6 +460,25 @@ function pendingExposure() {
     if (pendingEntries().some((o) => o.lane === lane.name && o.ticker === q.ticker)) {
       ls.skips++; ls.last_skip = 'entry already resting for this lane';
       return null;
+    }
+    // CROSS-LANE ANTI-STACK (2026-11-04, operator order): at most 2 positions in
+    // the same market across ALL lanes, resting orders included. The night's
+    // disaster was four lanes each buying the same market independently.
+    const stackCount = s.live.positions.filter((p) => p.market_id === q.ticker).length
+      + pendingEntries().filter((o) => o.ticker === q.ticker).length;
+    if (stackCount >= 2) {
+      ls.skips++; ls.last_skip = 'anti-stack: market already at 2 positions';
+      return null;
+    }
+    // CLUSTER CAP (2026-11-04, operator order): correlated same-round entries
+    // die together (evidence: four stop-losses in one :15 round). At most 2
+    // live positions share an expiration.
+    if (q.close_time) {
+      const sameRound = s.live.positions.filter((p) => p.close_time && Math.abs(new Date(p.close_time) - new Date(q.close_time)) < 1000).length;
+      if (sameRound >= 2) {
+        ls.skips++; ls.last_skip = 'cluster cap: round already at 2 positions';
+        return null;
+      }
     }
     // Kalshi tapered_deci_cent ticks: 0.01 steps are valid in every price range.
     const px = Number(f2(price));
