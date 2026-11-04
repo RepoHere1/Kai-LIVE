@@ -223,7 +223,10 @@ class KalshiWS {
         break;
 
       case 'error':
-        console.error('[KalshiWS] Server error:', msg.error);
+        // Log the WHOLE message: the server's error text is not always in
+        // msg.error (it printed "undefined" for every error). The raw payload
+        // is the only reliable record of what Kalshi actually said.
+        console.error('[KalshiWS] Server error:', JSON.stringify(msg).slice(0, 400));
         break;
 
       default:

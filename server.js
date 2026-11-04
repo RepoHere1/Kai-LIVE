@@ -3739,19 +3739,22 @@ async function boot() {
       // Only force a REST poll when the streamed balance is genuinely old.
       // Polling every 60s unconditionally ping-pongs with the engine's own
       // 429 retry at the rate limit (self-sustaining 429 loop).
+      // 2026-11-04: the cadence is 10 min (not 90s), and a rate-limit or any
+      // failure backs off for 15 min. The watcher only exists to catch external
+      // moves (kalshi.com trades, deposits), which are not second-by-second.
       const snap0 = LO.snapshot();
       const ageMs = snap0.as_of ? Date.now() - new Date(snap0.as_of).getTime() : Infinity;
-      if (ageMs < 90000) return;
+      if (ageMs < 600000) return;
       const before = LO.cash();
       await LO.refreshSnapshot();
       const snap = LO.snapshot();
-      if (snap.balance_stale) { acctWatchBackoffUntil = Date.now() + 3 * 60 * 1000; return; }
+      if (snap.balance_stale) { acctWatchBackoffUntil = Date.now() + 15 * 60 * 1000; return; }
       const after = LO.cash();
       if (after != null && before != null && Math.abs(after - before) >= 0.01) {
         log('acct_move', { from: Number(before.toFixed(2)), to: Number(after.toFixed(2)), delta: Number((after - before).toFixed(2)) });
         syncAllNoView();
       }
-    } catch (e) { acctWatchBackoffUntil = Date.now() + 3 * 60 * 1000; }
+    } catch (e) { acctWatchBackoffUntil = Date.now() + 15 * 60 * 1000; }
   }, 60000);
 
   // Keep every lane's series quoted even when no lane is running, so the

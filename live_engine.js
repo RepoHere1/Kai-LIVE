@@ -80,7 +80,7 @@ function create(deps) {
         // the rate limit and sustained the 429 loop indefinitely. 150 -> 300
         // -> 600s (capped). A rate-limited read is cheap; a starved engine
         // that never trades is not.
-        bal.backoff_ms = Math.min(600 * 1000, (bal.backoff_ms || 150 * 1000) * 2);
+        bal.backoff_ms = Math.min(1800 * 1000, (bal.backoff_ms || 150 * 1000) * 2);
         bal.backoff_until = Date.now() + bal.backoff_ms;
         setTimeout(() => scheduleBalance(), bal.backoff_ms + 500);
       }
