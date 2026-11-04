@@ -275,14 +275,18 @@ function create(deps) {
 
     function effectiveClip() {
     const s = st();
+    // OPERATOR ORDER 2026-11-04: every order is at most $0.50 (live AND dry).
+    // Tuning data, not money, is the goal right now. This is the single
+    // ceiling every entry path passes through.
+    const ORDER_MAX_DOLLARS = 0.50;
     // SIZE GOVERNOR (2026-11-03, operator-ordered): ceiling == base, so win streaks cannot grow the clip.
     const cs = s.clip_state || (s.clip_state = { base: 1.5, max: 1.5, ratchet_until: 0 });
-    if (cs.ratchet_until && Date.now() < cs.ratchet_until) return cs.base;
+    if (cs.ratchet_until && Date.now() < cs.ratchet_until) return Math.min(ORDER_MAX_DOLLARS, cs.base);
     const uc = usableCash();
     const equity = (uc ? uc.cash : 0) + pendingExposure();
     const baseline = (s.live && s.live.starting_balance) || 10;
     const target = Math.round(cs.base * Math.max(1, equity / baseline));
-    return Math.max(cs.base, Math.min(cs.max, target));
+    return Math.min(ORDER_MAX_DOLLARS, Math.max(cs.base, Math.min(cs.max, target)));
   }
 
 function pendingExposure() {
@@ -434,10 +438,10 @@ function pendingExposure() {
     // cash (default 25%). Evidence: a clip-scaled $11.55 entry on a $24
     // account (47%) - the heat gates only count OPEN positions, so the first
     // entry after a win could bet anything. This bounds it, always.
-    const posCap = Math.max(0.5, uc.cash * ((st().runtime && st().runtime.max_position_pct) || 0.25));
+    const posCap = Math.min(0.50, Math.max(0.5, uc.cash * ((st().runtime && st().runtime.max_position_pct) || 0.25)));
     // ABSOLUTE ORDER CAP: a stale cash figure must NEVER produce a big bet.
     // This is what makes the stale-cash fallback safe.
-    const hardCap = (st().runtime && st().runtime.max_order_dollars) || 2.00;
+    const hardCap = (st().runtime && st().runtime.max_order_dollars) || 0.50;
     const budget = Math.min(effectiveClip(), usable, posCap, hardCap);
     // PRICE-AWARE CLIP: the clip is a DOLLAR budget sized for normal prices
     // (~25c+). At 5c a dollar budget buys hundreds of lottery tickets and one

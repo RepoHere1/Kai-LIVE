@@ -1,6 +1,5 @@
 @echo off
+rem Start the LIVE server hidden via kctl, which checks the port first
+rem so a double-click cannot open a second node window that dies with EADDRINUSE.
 cd /d "C:\Users\darri\Kai-LIVE"
-title Kai-LIVE Server (Port 8788)
-echo Starting Kai-LIVE server on port 8788...
-node server.js
-pause
+powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "ops\kctl.ps1" live start

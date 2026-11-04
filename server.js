@@ -26,7 +26,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execFile, execFileSync } = require('child_process');
+const { execFile } = require('child_process');
 const WebSocket = require('ws');
 
 
@@ -1602,9 +1602,10 @@ async function markLivePositions() {
 
       // Time-decay exit at 80% of contract lifetime - LOSERS ONLY.
       // Winners (bid > entry) ride to settlement for the full $1 payout.
+      // 2026-11-04 OPERATOR ORDER: no time-decay exit either. A loser rides to
+      // settlement; per-order size ($0.50) is the loss limit.
       const totalLifeMs = new Date(q.close_time).getTime() - new Date(pos.opened).getTime();
       const lifePct = totalLifeMs > 0 ? heldMs / totalLifeMs : 1;
-      if (lifePct > 0.9 && bid != null && bid <= pos.entry_price * 0.95) { await LO.exitPosition(pos, bid, 'time_decay'); continue; }
 
       // TRAIL STOP: DELETED. The hard stop and take-profit below are the
       // only price exits; winners ride to settlement.
@@ -1612,13 +1613,10 @@ async function markLivePositions() {
       // ALL NO band positions ride to settlement (2026-11-03 exit autopsy):
       // fee-adjusted hold EV was +$48 vs realized -$31; the -20% stop cut
       // 68%-winners on mid-life noise. Only a -70% disaster floor exits early.
-      const bandDisaster = pos.strategy === 'all_no_markets' ? Number((pos.entry_price * 0.30).toFixed(3)) : null;
-      // TAKE PROFIT IS DEAD (operator order, 2026-11-03). Selling a winner
-      // early costs an EXIT FEE and caps the payout below $1.00 - a 0.61 entry
-      // sold at 0.98 booked +0.37, while the same contract settling pays
-      // +0.39 with no fee at all. Every winner now rides to settlement.
-      // Only the disaster floor cuts a loser early.
-      if (bandDisaster != null ? bid <= bandDisaster : (bid != null && bid <= pos.stop_loss)) await LO.exitPosition(pos, bid, 'stop_loss');
+      // 2026-11-04 OPERATOR ORDER: NO STOP LOSSES on the all-no book. Every
+      // position rides to settlement. Losses are capped by the per-order size
+      // ($0.50), not by an exit. Tuning data is the goal right now.
+      // (bandDisaster / stop_loss exits intentionally removed.)
     }
   }
 }
@@ -2108,11 +2106,14 @@ async function noBook() {
       // Use REAL market quotes - no synthetic fallbacks
       const no_bid = q.no_bid;
       const no_ask = q.no_ask;
+      // 2026-11-04 OPERATOR ORDER: one-sided books are tradable. We POST at the
+      // bid, so a NO entry only needs a real NO bid. Quote sanity still applies.
       if (q.facts_ok === false) continue;   // DATA INTEGRITY: payload failed verification
-      if (!no_bid || !no_ask || no_bid <= 0.02 || no_ask >= 0.98) continue;
+      if (!no_bid || no_bid <= 0.02 || (no_ask != null && no_ask >= 0.98)) continue;
       
-      const spread = no_ask - no_bid;
-      if (spread > 0.06) continue; // skip wide spreads (the hard thin line)
+      // Spread only where both sides exist; a one-sided book has no spread to test.
+      const spread = (no_ask != null) ? no_ask - no_bid : 0;
+      if (no_ask != null && spread > 0.06) continue; // skip wide spreads (the hard thin line)
       
       // Deep-value thesis, real basis: we ENTER at the bid (maker), so edge is
       // measured against the bid. Model prob >= min_fair and entry <= cap
@@ -2124,9 +2125,11 @@ async function noBook() {
       const mkRow = (side, fairSide, bid, askPx) => {
         if (state.safe_mode) return;   // FAIL CLOSED
         const cap = side === 'YES' ? anCfg.max_yes_price : anCfg.max_no_price;
-        if (bid == null || askPx == null) return;
-        const sideSpread = askPx - bid;
-        if (sideSpread > 0.06) return; // per-side thin line
+        // 2026-11-04: a one-sided book (no ask) is tradable. Only the bid is
+        // needed to post; the spread test runs only when both sides exist.
+        if (bid == null) return;
+        const sideSpread = askPx != null ? askPx - bid : 0;
+        if (askPx != null && sideSpread > 0.06) return; // per-side thin line
         // FAT-TAIL MARGIN: HYPE's jumps crush a smooth gaussian model. Demand
         // more probability margin there (evidence: its biggest losses both ways).
         const fairFloor = asset === 'HYPE-USD' ? Math.max(anCfg.min_fair, 0.58) : anCfg.min_fair;
@@ -2178,6 +2181,7 @@ async function noBook() {
           source: res.source,
           host: res.host,
           spread: sideSpread,
+          one_sided: askPx == null,
           tau,
           strike: q.strike,
           sigma: perSec || null,
@@ -3496,7 +3500,9 @@ async function runAllNoLive() {
   pending.forEach(o => busy.add(o.ticker));
   for (const r of rows) {
     if (r.edge < cfg.min_edge || r.kelly <= 0 || r.confidence < cfg.min_confidence) continue;
-    if (r.spread < cfg.min_spread || r.spread > cfg.max_spread) continue;
+    // 2026-11-04: spread floor/ceiling applies only where a spread was measured
+    // (both sides quoted). A one-sided row has no spread and must not be dropped by it.
+    if (r.one_sided !== true && (r.spread < cfg.min_spread || r.spread > cfg.max_spread)) continue;
     if (r.tau < cfg.min_tau_sec || r.tau > cfg.max_tau_sec) continue;
     // Deep-value pattern (configurable): buy the side the model says is >= min_fair
     // likely while it costs <= that side's cap. Capped downside + high probability
@@ -3588,21 +3594,11 @@ async function runAllNoExits() {
     const totalLife = Math.max(1, (new Date(pos.expiration).getTime() - new Date(pos.opened_at).getTime()) / 1000);
     const lifePct = 1 - tau / totalLife;
     
+    // 2026-11-04 OPERATOR ORDER: NO STOP LOSSES, NO TIME-DECAY EXIT. Every
+    // all-no position rides to settlement. Loss limit = per-order size ($0.50).
     let shouldExit = false;
     let exitReason = '';
     let exitPrice = mark;
-    
-    // TAKE PROFIT IS DEAD (operator order, 2026-11-03) - the paper book now
-    // mirrors LIVE: no early exit of a winner, it rides to settlement and
-    // takes the full $1.00 with no exit fee.
-    if (pos.stop_loss && mark <= pos.stop_loss) {
-      shouldExit = true;
-      exitReason = 'stop_loss';
-    } else if (lifePct > state.runtime.all_no.max_hold_pct) {
-      shouldExit = true;
-      exitReason = 'time_decay';
-    }
-    
     if (shouldExit) {
       const result = closeAllNoPosition(pos.id, exitPrice, exitReason);
       if (result.ok) {
