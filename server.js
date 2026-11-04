@@ -34,6 +34,7 @@ const sqlite3 = require('sqlite3').verbose();
 const kalshi = require('./kalshi');
 const kilo = require('./kilo');
 const brain = require('./brain_live');
+const perp = require('./perp_feed');
 const series_kind = require('./series_kind');
 const conviction = require('./conviction');
 const quote_stream = require('./quote_stream');
@@ -1691,7 +1692,8 @@ async function engineTick() {
     const result = brain.evaluate({
       q, spotPrice: s.price, strike: q.strike, tau, perSecVol: perSec,
       volWindow, fills, history: ls.price_history || [],
-      quotes: allQuotes, weights: state.signal_weights
+      quotes: allQuotes, weights: state.signal_weights,
+      perpTilt: perp.biasFor(lane.spot).bias
     });
 
     ls.last_edge = result.edge || 0;
@@ -3155,6 +3157,7 @@ async function handle(req, res) {
     });
     return json(res, { ...result, lane: lane.name, series: act.series, quote: q, weights: state.signal_weights });
   }
+  if (p === '/api/perp') return json(res, perp.snapshot());
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'no route ' + p }));
 }
@@ -3267,6 +3270,7 @@ async function runAllNoBrainPass() {
         q, spotPrice: s.price, strike: q.strike, tau, perSecVol: perSec,
         volWindow, fills: [], history: noLs.price_history || [],
         quotes: [q], weights: state.signal_weights,
+        perpTilt: perp.biasFor(c.asset).bias,
       });
       if (!result.side) continue;
       const side = result.side;
@@ -3691,6 +3695,10 @@ async function boot() {
   } catch (e) {
     console.error('[boot] warmCache failed:', e.message);
   }
+
+  // Perp sentiment feed: Hyperliquid funding/premium/OI -> brain drift tilt
+  perp.start();
+  console.log('[boot] perp_feed started');
 
   // Coinbase WebSocket for real-time spot prices (replaces 2s HTTP polling)
   const spotProducts = ['BTC-USD', 'ETH-USD', 'XRP-USD', 'HYPE-USD'];

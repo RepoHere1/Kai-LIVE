@@ -54,7 +54,7 @@ function normCdf(x) {
 // Core: fair value for a digital "Up" contract with momentum tilt.
 // Returns { fairYes, fairNo, z, sigma, mu } or null when uncomputable.
 // ---------------------------------------------------------------------------
-function fairValues(spotPrice, strike, tauSec, sigma, volWindow) {
+function fairValues(spotPrice, strike, tauSec, sigma, volWindow, tilt) {
   if (!(spotPrice > 0) || !(strike > 0) || !(tauSec > 0) || !(sigma > 0)) return null;
 
   // Momentum: shrunk log-drift over the recent tick window, expressed over
@@ -71,6 +71,15 @@ function fairValues(spotPrice, strike, tauSec, sigma, volWindow) {
   const sigRootTau = sigma * Math.sqrt(tauSec);
   if (sigRootTau <= 0) return null;
   mu = Math.max(-sigRootTau, Math.min(sigRootTau, mu)); // cap at 1 sigma
+
+  // PERP TILT (2026-11-04): Hyperliquid funding/premium/OI bias for this asset
+  // shifts the drift by at most 0.5*sigma*sqrt(tau), INSIDE the same +/-1
+  // sigma cap above. The derivatives market can lean the model; it can never
+  // dominate it. tilt=0 (stale feed) leaves the model exactly as before.
+  if (Number.isFinite(tilt) && tilt !== 0) {
+    mu = Math.max(-sigRootTau, Math.min(sigRootTau,
+      mu + Math.max(-1, Math.min(1, tilt)) * 0.5 * sigRootTau));
+  }
 
   const z = (Math.log(spotPrice / strike) + mu) / sigRootTau;
   // Confidence cap: a model fair of 0.87+ on a 15-minute crypto contract is
@@ -112,7 +121,7 @@ function edgeMetric(winRate, lossRate, likelihood) {
 // Ensemble evaluation - REAL mispricing engine
 // ---------------------------------------------------------------------------
 function evaluate(params) {
-  const { q, spotPrice, strike, tau, perSecVol, volWindow, quotes, weights, identity = IDENTITY } = params;
+  const { q, spotPrice, strike, tau, perSecVol, volWindow, quotes, weights, identity = IDENTITY, perpTilt } = params;
   const t = TUNE[identity] || TUNE.DRY;
   const regime = classifyRegime(spotPrice ? { vol_per_sec: perSecVol } : null, quotes, volWindow);
   const out = {
@@ -125,7 +134,7 @@ function evaluate(params) {
     return out;
   }
 
-  const fv = fairValues(spotPrice, strike, tau, perSecVol, volWindow);
+  const fv = fairValues(spotPrice, strike, tau, perSecVol, volWindow, perpTilt);
   if (!fv) { out.reason = "fair value uncomputable"; return out; }
   out.fairYes = Number(fv.fairYes.toFixed(4));
   out.fairNo = Number(fv.fairNo.toFixed(4));
