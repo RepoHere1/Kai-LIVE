@@ -50,7 +50,16 @@ function create(deps) {
 
   async function readBalanceNow() {
     try {
-      const b = await kalshi.raw('live', 'GET', '/portfolio/balance', { noRetry429: true });
+      // HARD TIMEOUT (2026-11-04): a stalled response body can outlive fetch's
+      // AbortSignal in undici, leaving balInflight settled-never. Every later
+      // readBalance then returns the stuck promise: no retries, no logs, cash
+      // null for the whole process (observed: two 429s at boot, then silence
+      // for 30+ minutes while the endpoint had recovered). The race guarantees
+      // this function always settles in <=20s so the backoff ladder keeps run.
+      const b = await Promise.race([
+        kalshi.raw('live', 'GET', '/portfolio/balance', { noRetry429: true }),
+        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('balance read timed out after 20s')), 20000); if (t.unref) t.unref(); }),
+      ]);
       const dollars = num(b.balance_dollars);
       const cents = num(b.balance);
       bal.cash = dollars != null ? dollars : (cents != null ? cents / 100 : null);
