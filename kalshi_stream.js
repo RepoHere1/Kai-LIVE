@@ -7,6 +7,13 @@ const WebSocket = require('ws');
 const kalshi = require('./kalshi.js');
 
 const WS_URL = process.env.KALSHI_WS_URL || 'wss://external-api-ws.kalshi.com/trade-api/ws/v2';
+// NOTE 2026-11-04: Kalshi's WS v2 (external-api-ws) has NO `balance` channel -
+// verified live: subscribing it returns {"code":8,"msg":"Unknown channel name"}.
+// The only authenticated push channels are the three below. Account cash
+// therefore comes from REST (throttled + laddered in live_engine), with WS
+// fill/order/position events triggering immediate re-reads. The `balance`
+// message handler below stays dormant so if Kalshi ever adds the channel we
+// pick it up without a redeploy.
 const CHANNELS = ['market_positions', 'user_orders', 'fill'];
 
 function handshakeHeaders() {
@@ -130,6 +137,16 @@ class AccountStream {
     }
     if (type === 'fill') {
       this.onEvent({ type: 'fill', msg });
+      return;
+    }
+    if (type === 'balance') {
+      // DORMANT PATH (2026-11-04): Kalshi has no balance channel today
+      // (code 8 "Unknown channel name", verified live). If they add one and we
+      // subscribe, this fires and cash becomes a push with zero polling.
+      this.balanceMsg = msg;
+      this.balanceAt = Date.now();
+      if (!this.seenBalance) { this.seenBalance = true; this.log('stream_balance_first', { msg: JSON.stringify(msg).slice(0, 200) }); }
+      this.onEvent({ type: 'balance', msg });
       return;
     }
     if (!this.unknownTypes.has(type)) {

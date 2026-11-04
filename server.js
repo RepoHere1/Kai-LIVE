@@ -2560,12 +2560,18 @@ async function handle(req, res) {
 
   // --- health / settings
   if (p === '/api/health') {
-    const bootCash = await liveCash();
+    // OPERATOR ORDER 2026-11-04: health NEVER awaits a balance read (that
+    // block could stall 20s - the tape's SERVER SLOW lines) and NEVER shows a
+    // persisted snapshot. It reports the live engine truth: a number with a
+    // source and age, or an honest null with the error.
     return json(res, { ok: true, safe_mode: !!state.safe_mode, state_source: state.state_source || 'primary', boots: state.boot_count || 0, pid: process.pid,
-      ok: true, mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
+      mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
       hosts: { kalshi_live: kalshi.LIVE_BASE, kalshi_demo: kalshi.DEMO_BASE, spot: 'api.exchange.coinbase.com', llm: ENV.KILO_BASE_URL },
       credentials: { live_key: kalshi.accounts.live.keyId, demo_key: kalshi.accounts.demo.keyId, llm_token: (ENV.KILO_TOKEN || '').slice(0, 12) + '...' },
-      live_balance: bootCash,
+      live_balance: LO.cash(),
+      balance_source: LO.balanceSource ? LO.balanceSource() : null,
+      balance_age_ms: LO.cashAgeMs ? LO.cashAgeMs() : null,
+      balance_error: LO.cashError ? LO.cashError() : null,
     });
   }
 
@@ -3621,8 +3627,12 @@ async function boot() {
   // Real boot time (the persisted booted_at used to leak across restarts and
   // show fake 50-hour uptimes in /api/health).
   state.booted_at = new Date().toISOString();
-  const bootCash = await liveCash();
-  log('boot', { mode: 'live', live_balance: bootCash, kalshi_live: kalshi.LIVE_BASE });
+  // ERADICATED (operator order 2026-11-04): boot used to AWAIT a REST balance
+  // read (20s stall risk) and then log it - and the console banner printed the
+  // PERSISTED starting_balance snapshot, which is how "$9.84" stayed on screen
+  // while the real account read was failing. Boot now proceeds immediately;
+  // the live value lands async from the WS push or the first REST read.
+  log('boot', { mode: 'live', live_balance: LO.cash(), balance_source: LO.balanceSource ? LO.balanceSource() : null, kalshi_live: kalshi.LIVE_BASE });
 
   // Initial spot fetch for immediate data
   await pollSpot();
@@ -3802,7 +3812,12 @@ async function boot() {
     console.log('  kalshi demo  :', kalshi.DEMO_BASE, '(fallback)');
     console.log('  spot         : Coinbase Exchange public ticker');
     console.log('  llm          :', ENV.KILO_BASE_URL, 'model', ENV.KILO_MODEL);
-    console.log('  mode         :', 'live', '| live_balance:', state.live ? state.live.starting_balance : 'N/A');
+    // ERADICATED (operator order 2026-11-04): this line used to print the
+  // persisted state.live.starting_balance - a snapshot that could be days old
+  // while the real account read was failing. Live source only now: a number
+  // from a real WS push / REST read, or an honest "reading...".
+  const bannerCash = LO.cash();
+  console.log('  mode         :', 'live', '| live_balance:', bannerCash == null ? 'reading... (live source only - no snapshot fallback)' : bannerCash, '| source:', LO.balanceSource ? LO.balanceSource() : null);
     // Lanes start/stop is operator-controlled only. No auto-start.
     save();
   });

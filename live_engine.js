@@ -68,6 +68,7 @@ function create(deps) {
       bal.at = Date.now();
       bal.cash_at = Date.now();       // the read that produced this cash
       bal.backoff_ms = 150 * 1000;    // a successful read resets the backoff
+      bal.source = 'rest';            // provenance: this number came from REST
       const s = st();
       if (s.live) {
         s.live.last_balance = { cash: bal.cash, breakdown: bal.breakdown, portfolio_value: bal.portfolio_value, at: bal.at };
@@ -128,13 +129,11 @@ function create(deps) {
       const age = bal.cash_at ? now - bal.cash_at : null;
       return { cash: bal.cash, stale: age == null || age > CASH_TRUST_MS, age_ms: age, source: 'live_read' };
     }
-    // Nothing read in this process: fall back to the last CONFIRMED cash, but
-    // only inside the trust window, and only as a STALE figure.
-    const s = st();
-    const lb = s.live && s.live.last_balance;
-    if (lb && lb.cash != null && lb.at && now - lb.at <= CASH_TRUST_MS) {
-      return { cash: lb.cash, stale: true, age_ms: now - lb.at, source: 'persisted' };
-    }
+    // ERADICATED (operator order 2026-11-04): this used to fall back to the
+    // PERSISTED state.live.last_balance for up to 20 minutes after a restart -
+    // the last snapshot leak. A number no live source confirmed in THIS
+    // process is not money: cash unknown = no sizing, no exceptions. The boot
+    // and WS-connect reads fill it within seconds of a healthy start.
     return null;
   }
 
@@ -170,8 +169,39 @@ function create(deps) {
   // ---- stream events --------------------------------------------------------------------------
   function onStream(ev) {
     if (!ev) return;
-    if (ev.type === 'connected') { scheduleBalance(); readEventPositions(); seedRestingOrders(); return; }
+    if (ev.type === 'connected') { readBalance(); readEventPositions(); seedRestingOrders(); return; }
+    if (ev.type === 'balance') { applyStreamBalance(ev.msg); return; }
     if (ev.type === 'fill' || ev.type === 'position') scheduleBalance();
+  }
+
+  // ---- balance: the WS push is the primary truth, REST is bootstrap/repair ----
+  // OPERATOR ORDER 2026-11-04: eradicate the persisted-snapshot lie forever.
+  // The `balance` channel pushes cash on subscribe and on every change; the
+  // REST read only exists to bootstrap before the first push and to repair a
+  // dropped socket. bal.source records WHICH path produced the current number
+  // so no display can ever silently show a stale/persisted figure again.
+  function applyStreamBalance(msg) {
+    if (!msg) return;
+    const dollars = num(msg.balance_dollars);
+    const cents = num(msg.balance);
+    const cash = dollars != null ? dollars : (cents != null ? cents / 100 : null);
+    if (cash == null) return;
+    const prev = bal.cash;
+    bal.cash = cash;
+    bal.cash_at = Date.now();
+    bal.at = Date.now();
+    bal.error = null;
+    bal.backoff_ms = 150 * 1000;         // a live push resets the REST ladder
+    bal.backoff_until = 0;
+    bal.source = 'ws';
+    const s = st();
+    if (s.live) {
+      s.live.last_balance = { cash: bal.cash, breakdown: bal.breakdown || [], portfolio_value: bal.portfolio_value, at: bal.at, source: 'ws' };
+      try { save(); } catch (e) { /* state busy */ }
+    }
+    if (prev == null || Math.abs(cash - prev) >= 0.01) {
+      log('balance_stream', { from: prev, to: cash, source: 'ws' });
+    }
   }
 
   function start() {
@@ -609,6 +639,7 @@ function pendingExposure() {
     pendingExposure,
     refreshIfStale: async () => { if (Date.now() - bal.at > BALANCE_RECONCILE_MS) scheduleBalance(); },
     refreshSnapshot: readBalance,
+    balanceSource: () => bal.source || null,
     openEntry,
     reconcile,
     exitPosition,
