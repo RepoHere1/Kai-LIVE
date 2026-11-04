@@ -33,16 +33,26 @@ function WLog([string]$m) { Add-Content -Path $Log -Value ("{0} {1}" -f (Get-Dat
 WLog 'watchdog v3 started (repo-stable scripts, ownership-safe pids, graceful recovery)'
 
 function Test-PortListening([int]$Port) {
+  # HARDENED 2026-11-04: the old synchronous Connect() has NO timeout and was
+  # observed freezing the whole watchdog (stuck 20:43 2026-11-03 -> next
+  # morning, no heartbeats, mutex held). Async connect with a 3s cap.
+  # Semantics unchanged (v2 rule 2): ConnectionRefused = down; anything else,
+  # including a connect timeout, = alive so we never kill a merely-slow server.
   $c = New-Object System.Net.Sockets.TcpClient
   try {
-    # SYNCHRONOUS connect: success = alive; ConnectionRefused = really down.
-    $c.Connect('127.0.0.1', $Port)
-    return $true
-  } catch {
-    $ex = $_.Exception
-    if ($ex.InnerException) { $ex = $ex.InnerException }
-    if ($ex -is [System.Net.Sockets.SocketException]) { return ($ex.SocketErrorCode -ne 'ConnectionRefused') }
-    return $true
+    $iar = $c.BeginConnect('127.0.0.1', $Port, $null, $null)
+    if ($iar.AsyncWaitHandle.WaitOne(3000)) {
+      try {
+        $c.EndConnect($iar)
+        return $true
+      } catch {
+        $ex = $_.Exception
+        if ($ex.InnerException) { $ex = $ex.InnerException }
+        if ($ex -is [System.Net.Sockets.SocketException]) { return ($ex.SocketErrorCode -ne 'ConnectionRefused') }
+        return $true
+      }
+    }
+    return $true   # timed out mid-connect: port is not refusing - treat as alive
   } finally {
     try { $c.Close() } catch { }
   }
