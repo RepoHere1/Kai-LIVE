@@ -316,10 +316,11 @@ function create(deps) {
 
     function effectiveClip() {
     const s = st();
-    // OPERATOR ORDER 2026-11-04: every order is at most $0.50 (live AND dry).
-    // Tuning data, not money, is the goal right now. This is the single
-    // ceiling every entry path passes through.
-    const ORDER_MAX_DOLLARS = 0.50;
+    // OPERATOR ORDER 2026-11-05 ($1 SUPERBRAIN TEST): the ceiling is now $1.00.
+    // The 2026-11-04 $0.50 cap made certainty contracts (px 0.90-0.98)
+    // mathematically unbuyable: floor(0.50/0.95) = 0 contracts. The certainty
+    // lane buys at most 1 contract under $1.00 — that IS the test.
+    const ORDER_MAX_DOLLARS = 1.00;
     // SIZE GOVERNOR (2026-11-03, operator-ordered): ceiling == base, so win streaks cannot grow the clip.
     const cs = s.clip_state || (s.clip_state = { base: 1.5, max: 1.5, ratchet_until: 0 });
     if (cs.ratchet_until && Date.now() < cs.ratchet_until) return Math.min(ORDER_MAX_DOLLARS, cs.base);

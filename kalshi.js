@@ -7,6 +7,33 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// POOL-ROT VACCINE (2026-11-05): this machine's TCP stack periodically kills
+// long-lived keep-alive sockets SILENTLY. Node's global fetch (undici) then
+// hands new requests to dead pooled sockets - every call times out while a
+// FRESH process (fresh pool) fetches the same URL in 1.7s. Measured
+// 2026-11-05: a minutes-old server process had 'balance read timed out after
+// 20s' on every Kalshi call while a fresh probe returned HTTP in 1717ms.
+// Fix: short keep-alive reaping + pipelining off, and the pool is REBUILT
+// from scratch on every network error inside raw() - self-healing transport.
+let _undici = null;
+try { _undici = require('undici'); } catch (e) { /* bundled fetch still works with defaults */ }
+let kalshiAgent = null;
+function refreshAgent() {
+  if (!_undici || !_undici.setGlobalDispatcher || !_undici.Agent) return false;
+  try { if (kalshiAgent) kalshiAgent.close(); } catch (e) { }
+  kalshiAgent = new _undici.Agent({
+    connect: { timeout: 6000 },
+    keepAliveTimeout: 4000,       // reap idle sockets fast: dead keep-alives
+    keepAliveMaxTimeout: 8000,    // ignore server's longer keep-alive offers
+    pipelining: 0,                // never queue a second request on a socket
+    headersTimeout: 12000,
+    bodyTimeout: 15000,
+  });
+  _undici.setGlobalDispatcher(kalshiAgent);
+  return true;
+}
+const AGENT_OK = refreshAgent();
+
 const HERE = __dirname;
 function loadEnv(file) {
   const out = {};
@@ -138,7 +165,14 @@ async function raw(acctName, method, route, opts) {
       // the whole lane tick chain - the 'stale HYPE heartbeat' incident.
       r = await fetch(url, Object.assign({}, init, { signal: AbortSignal.timeout(15000) }));
     } catch (e) {
-      throw new Error('network: ' + e.message);
+      // POOL-ROT VACCINE: a network failure means the pooled sockets may be
+      // dead. Rebuild the pool and RETRY (bounded by the attempt loop) instead
+      // of throwing - the old code gave up instantly while a fresh process
+      // could fetch the same URL fine.
+      refreshAgent();
+      lastErr = new Error('network: ' + e.message);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      continue;
     }
     const text = await r.text();
     let parsed = null;
@@ -322,4 +356,4 @@ async function markets(series, limit) {
   return get('/markets', { query: { limit: limit || 5, status: 'open', series_ticker: series }, ttlMs: 1500 });
 }
 
-module.exports = { loadEnv, ENV, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards };
+module.exports = { loadEnv, ENV, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards, refreshAgent, agentActive: () => !!kalshiAgent };
