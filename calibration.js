@@ -39,7 +39,7 @@
 
 const K = 40;              // prior weight in contracts of market-price evidence
 const SHADOW_MIN_GAP_MS = 10 * 60 * 1000;  // same ticker+side shadowed at most every 10min
-const SHADOW_PENDING_CAP = 400;            // bounded memory / ledger churn
+const SHADOW_PENDING_CAP = 2000;           // bounded memory (15m series settle in minutes; sweep clears fast)
 
 function assetOf(ticker) {
   const t = String(ticker || '');
@@ -95,6 +95,12 @@ function create(deps) {
     if (!b) return null;
     return asset + '|' + horizon + '|' + side + '|' + b;
   }
+  // 2026-11-05: pooled cross-asset zone key ('*' = all assets pooled).
+  function poolKey(horizon, side, price) {
+    const b = priceBucketOf(price);
+    if (!b) return null;
+    return '*|' + horizon + '|' + side + '|' + b;
+  }
 
   function bump(k, outcome) {
     const rec = buckets.get(k) || { n: 0, wins: 0 };
@@ -105,8 +111,9 @@ function create(deps) {
   }
 
   // ---------------------------------------------------------------------
-  // THE GATE — hierarchical posterior:
-  //   pricePost = Laplace(price-zone wins | prior = market price)
+  // THE GATE — hierarchical posterior (3 layers, 2026-11-05):
+  //   poolPost  = Laplace(pooled cross-asset zone wins | prior = market price)
+  //   pricePost = Laplace(asset zone wins | prior = poolPost)
   //   adjusted  = Laplace(claimed-bucket wins | prior = pricePost)
   // adjusted - price >= minEdge or no trade. Ever. Again.
   // ---------------------------------------------------------------------
@@ -125,9 +132,16 @@ function create(deps) {
     if (!k) return { ok: false, adjusted: null, n: 0, realized: null, bias: null, reason: 'no bucket' };
     const prec = pk ? (buckets.get(pk) || { n: 0, wins: 0 }) : { n: 0, wins: 0 };
     const crec = buckets.get(k) || { n: 0, wins: 0 };
-    // Layer 1: what this PRICE ZONE has actually delivered (market price as
-    // prior). This is where the 504-row warm start and the forensic law live.
-    const pricePost = (prec.wins + K * price) / (prec.n + K);
+    const zK = poolKey(horizon, side, price);
+    const zrec = zK ? (buckets.get(zK) || { n: 0, wins: 0 }) : { n: 0, wins: 0 };
+    // Layer 0 (2026-11-05 starvation fix): the CROSS-ASSET pooled zone — same
+    // horizon/side/price-zone across every asset. Crypto NOs in the same zone
+    // behave alike; pooling multiplies effective evidence ~4x so buckets warm
+    // in days instead of months. Market price stays the floor of the stack.
+    const poolPost = (zrec.wins + K * price) / (zrec.n + K);
+    // Layer 1: what THIS ASSET's price zone delivered, with the pooled zone
+    // posterior as its prior (the warm start + forensic law live here).
+    const pricePost = (prec.wins + K * poolPost) / (prec.n + K);
     // Layer 2: what the CLAIMED-FAIR bucket delivered, with the price-zone
     // posterior as its prior — the model must EARN trust over the zone.
     const adjusted = (crec.wins + K * pricePost) / (crec.n + K);
@@ -137,11 +151,11 @@ function create(deps) {
     const realized = crec.n > 0 ? crec.wins / crec.n : (prec.n > 0 ? prec.wins / prec.n : null);
     let reason;
     if (edge >= minEdge) reason = 'ok';
-    else if (crec.n < 10 && prec.n < 10) reason = 'bucket cold (c:' + crec.n + ' p:' + prec.n + ') — market price only';
+    else if (crec.n < 10 && prec.n < 10 && zrec.n < 10) reason = 'bucket cold (c:' + crec.n + ' p:' + prec.n + ' z:' + zrec.n + ') — market price only';
     else reason = 'zone realized ' + (prec.n > 0 ? ((prec.wins / prec.n) * 100).toFixed(1) + '%' : '?') +
       '/claim ' + claimed.toFixed(2) + ' — insufficient edge';
     return { ok: edge >= minEdge, adjusted: Number(adjusted.toFixed(4)), n: crec.n,
-             zone_n: prec.n, zone_realized: prec.n > 0 ? Number((prec.wins / prec.n).toFixed(4)) : null,
+             zone_n: prec.n, pool_n: zrec.n, zone_realized: prec.n > 0 ? Number((prec.wins / prec.n).toFixed(4)) : null,
              realized: realized != null ? Number(realized.toFixed(4)) : null,
              bias: Number(bias.toFixed(4)), bucket: k, reason };
   }
@@ -199,6 +213,8 @@ function create(deps) {
       // The price zone learns from shadows too (row.entry_price is the zone).
       const spk = pKey(assetOf(row.market_id), horizonOf(row.market_id, row.strategy), row.side, row.entry_price);
       if (spk) bump(spk, outcome);
+      const zpk = poolKey(horizonOf(row.market_id, row.strategy), row.side, row.entry_price);
+      if (zpk) bump(zpk, outcome);
       if (dbRun) {
         // Positional close: never leaves an unsettled shadow behind.
         dbRun(`UPDATE calibration SET outcome = ?, pnl = ? WHERE market_id = ? AND side = ? AND source = 'shadow' AND outcome IS NULL`,
@@ -242,13 +258,29 @@ function create(deps) {
     // PRICE ZONE — the forensic law's own axis (profit <=> entry < realized).
     // INSERT OR IGNORE dedups the identical-timestamp burst rows.
     if (dbAll) {
-      // Boot-time write storms (LIVE engine syncing positions/orders) hold
-      // the write lock in bursts > the 5s busyTimeout. Retry with backoff
-      // instead of losing the whole warm start to one SQLITE_BUSY.
+      // 2026-11-05 STARVATION FIX (measured: Mirror 32/514 rows, LIVE 12/675):
+      // the warm start ran on the engine's SHARED connection, whose boot
+      // write-storm holds an open transaction — INSERTs there died with
+      // "cannot start a transaction within a transaction", which is NOT
+      // SQLITE_BUSY and cannot be retried. Fix: a DEDICATED connection with
+      // its own transaction context + 5s busyTimeout; BUSY retries below.
+      let bf = null;
+      let run = dbRun, qAll = dbAll;
+      if (deps.dbFile) {
+        try {
+          const sqlite3 = require('sqlite3');
+          bf = new sqlite3.Database(deps.dbFile);
+          bf.configure('busyTimeout', 5000);
+          run = (sql, params) => new Promise((res, rej) =>
+            bf.run(sql, params, (e) => e ? rej(e) : res()));
+          qAll = (sql, params) => new Promise((res, rej) =>
+            bf.all(sql, params, (e, rows) => e ? rej(e) : res(rows)));
+        } catch (e) { bf = null; run = dbRun; qAll = dbAll; }
+      }
       const runRetry = async (sql, params) => {
         let delay = 250;
         for (let i = 0; i < 10; i++) {
-          try { return await dbRun(sql, params); }
+          try { return await run(sql, params); }
           catch (e) {
             if (!/SQLITE_BUSY/.test(String(e && e.message)) || i === 9) throw e;
             await new Promise((r) => setTimeout(r, delay));
@@ -259,7 +291,7 @@ function create(deps) {
       const allRetry = async (sql, params) => {
         let delay = 250;
         for (let i = 0; i < 10; i++) {
-          try { return await dbAll(sql, params); }
+          try { return await qAll(sql, params); }
           catch (e) {
             if (!/SQLITE_BUSY/.test(String(e && e.message)) || i === 9) throw e;
             await new Promise((r) => setTimeout(r, delay));
@@ -317,6 +349,8 @@ function create(deps) {
           if (r.bucket) bump(r.bucket, r.outcome);
           const pk = pKey(assetOf(r.market_id), horizonOf(r.market_id, r.strategy), r.side || 'NO', r.entry_price);
           if (pk) bump(pk, r.outcome);
+          const zk = poolKey(horizonOf(r.market_id, r.strategy), r.side || 'NO', r.entry_price);
+          if (zk) bump(zk, r.outcome);
         }
         // Reload unsettled shadows so a restart does not orphan them.
         const pend = await allRetry(`SELECT * FROM calibration WHERE outcome IS NULL AND source = 'shadow'`);
@@ -324,6 +358,8 @@ function create(deps) {
         log('calibration_boot', { backfilled: n, ledger_rows: (all || []).length, buckets: buckets.size, pending_shadows: pending.size });
       } catch (e) {
         console.error('[calibration] init failed:', e.message);
+      } finally {
+        if (bf) { const b = bf; bf = null; try { b.close(); } catch (e) {} }
       }
     }
   }
@@ -344,6 +380,8 @@ function create(deps) {
       bump(k, outcome);
       const pk = pKey(asset, horizon, side, price);
       if (pk) bump(pk, outcome);
+      const zk = poolKey(horizon, side, price);
+      if (zk) bump(zk, outcome);
       if (dbRun) dbRun(`INSERT OR IGNORE INTO calibration
         (ts, market_id, strategy, source, side, asset, horizon, bucket,
          claimed_fair, entry_price, adjusted, outcome, pnl, sigma_per_sec, tau_sec, strike, spot_at_entry)

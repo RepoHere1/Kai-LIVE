@@ -990,7 +990,7 @@ state.boot_count = (state.boot_count || 0) + 1;
 // money, so the gate matters MOST here — the model's claimed fair is never
 // traded directly; every entry must clear the calibration gate (buy below
 // REALIZED probability). Blocked candidates are shadow-traded for free.
-const CALIB = calibrationMod.create({ dbRun, dbAll, log: (k, o) => { try { log(k, o); } catch (e) {} } });
+const CALIB = calibrationMod.create({ dbRun, dbAll, dbFile: DB_FILE, log: (k, o) => { try { log(k, o); } catch (e) {} } });
 CALIB.init().catch((e) => { console.error('[calibration] boot failed:', e.message); });
 // LIVE order lifecycle against the real Kalshi account (see live_orders.js).
 const LIVE_STREAM = new (require('./kalshi_stream').AccountStream)({
