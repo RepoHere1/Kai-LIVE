@@ -177,7 +177,15 @@ async function getOrder(orderId, exchangeIndex) {
 
 // Moves funds between exchange shards on the primary account (Kalshi intra-account transfer).
 // Kalshi collateral is per shard: an order is checked against the shard its market lives on.
-// amount is in centicents: 1 dollar = 10,000 centicents. Transfers settle asynchronously.
+// amount is in centicents: 1 dollar = 10,000 centicents. PROVEN on this account
+// (2026-11-03 logs: $0.10/$0.24/$0.32 transfers 0->2 settled and funded shard-2
+// KXXRP/KXBTC orders minutes later). A third-party doc summary claims "amount in
+// cents" - if that were true those transfers (1000/2400/3200 = $10/$24/$32) would
+// have exceeded the ~$8 balance and been refused. Empirics beat summaries.
+// Shard map per Kalshi docs: 0 default engine, 1 combos, 2 crypto+commodities,
+// 3 tennis/baseball/basketball. The engine trusts each market's own
+// exchange_index field (q.exchange_index) - this map is documentation only.
+// Transfers settle asynchronously; poll the balance breakdown after.
 async function transferBetweenShards(dollars, sourceShard, destShard) {
   return raw("live", "POST", "/portfolio/intra_exchange_instance_transfer", { body: {
     amount: Math.round(dollars * 10000),

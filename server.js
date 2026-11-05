@@ -2759,6 +2759,24 @@ async function handle(req, res) {
 // THE VACCINE — empirical calibration snapshot (2026-11-04): buckets,
 // realized-vs-claimed bias, pending shadows. Read-only.
 if (p === '/api/calibration') return json(res, CALIB.snapshot());
+  if (p === '/api/shards') return json(res, { cash: LO.cash(), shards: LO.shards ? LO.shards() : [] });
+  if (p === '/api/ops/transfer' && method === 'POST') {
+    // LOOPBACK OPS: move cash between exchange shards through the engine's warm
+    // API pool (fresh-process probes get tarpitted). Empirics: crypto markets
+    // live on shard 2 (KXXRP/KXBTC live_order_placed logs, 2026-11-03).
+    const b = await readBody(req);
+    const to = Number.isInteger(b.to) ? b.to : null;
+    const dollars = Number(b.dollars);
+    if (to == null || to < 0 || !(dollars > 0) || dollars > 50) return json(res, { error: 'body needs integer "to" shard and "dollars" in (0, 50]' }, 400);
+    try {
+      const r = await LO.transferToShard(to, dollars);
+      log('live_shard_transfer', { from: 0, to, dollars, via: 'ops_endpoint' });
+      return json(res, r);
+    } catch (e) {
+      log('live_shard_transfer_failed', { to, dollars, error: String(e.message).slice(0, 200) });
+      return json(res, { error: String(e.message).slice(0, 300) }, 502);
+    }
+  }
   if (p === '/api/cache') return json(res, { ok: true, stats: kalshi.getCacheStats ? kalshi.getCacheStats() : { error: 'not available' } });
   if (p === '/api/cache' && method === 'POST') {
     const b = await readBody(req);

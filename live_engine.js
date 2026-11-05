@@ -661,6 +661,15 @@ function pendingExposure() {
     refreshIfStale: async () => { if (Date.now() - bal.at > BALANCE_RECONCILE_MS) scheduleBalance(); },
     refreshSnapshot: readBalance,
     balanceSource: () => bal.source || null,
+    // Shard cash map + ops transfer. Fresh-process REST probes to the portfolio
+    // endpoints get tarpitted after rate-limit storms; the server's warm pool
+    // does not. Ops transfers run through THIS process.
+    shards: () => (bal.breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) })),
+    transferToShard: async (target, dollars) => {
+      const response = await kalshi.transferBetweenShards(dollars, 0, target);
+      await readBalance();
+      return { response, shards: (bal.breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) })) };
+    },
     openEntry,
     reconcile,
     exitPosition,

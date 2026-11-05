@@ -191,6 +191,28 @@ while ($true) {
     $lanesOn = 0
     if ($st) { foreach ($p in $st.PSObject.Properties) { if ($p.Value.running) { $lanesOn++ } } }
     $totPnl = if ($null -ne $lastPnl -and $null -ne $lastLanePnl) { [Math]::Round($lastPnl + $lastLanePnl, 2) } else { '?' }
+    # THE VACCINE, on the tape: empirical calibration verdict. Green = the model
+    # is calibrated or understates; Red = the death zone (it overstates favorites);
+    # DarkYellow = not enough settled evidence yet (n < 20 per bucket).
+    $cal = J "http://127.0.0.1:$($Cfg.Port)/api/calibration"
+    if ($cal -and $cal.buckets) {
+      $warm = @($cal.buckets | Where-Object { [int]$_.n -ge 20 })
+      $over = @($warm | Where-Object { $_.status -eq 'overstated' })
+      $okBk = @($warm | Where-Object { $_.status -ne 'overstated' })
+      $worst = $null
+      foreach ($bkt in $warm) { if ($null -eq $worst -or [double]$bkt.bias -gt [double]$worst.bias) { $worst = $bkt } }
+      $vcol = if ($warm.Count -eq 0) { 'DarkYellow' } elseif ($over.Count -gt $okBk.Count) { 'Red' } else { 'Green' }
+      $wtxt = 'no warm buckets (n>=20) yet'
+      if ($worst) { $wtxt = ("worst {0}: model {1} real {2} (n={3})" -f $worst.bucket, [Math]::Round([double]$worst.center,2), [Math]::Round([double]$worst.realized,2), $worst.n) }
+      Line $vcol ("VACCINE {0} warm buckets | {1} overstated / {2} ok | {3} | shadows {4}" -f $warm.Count, $over.Count, $okBk.Count, $wtxt, $(if ($null -ne $cal.pending_shadows) { $cal.pending_shadows } else { 0 }))
+    }
+    # SHARDS: per-shard cash. Entries die with "shard funding" skips when the
+    # target shard (2 = crypto/commodities) runs dry - this makes it visible.
+    $sh = J "http://127.0.0.1:$($Cfg.Port)/api/shards"
+    if ($sh -and $sh.shards) {
+      $stxt = ($sh.shards | ForEach-Object { "s{0}:`${1}" -f $_.exchange_index, [Math]::Round([double]$_.balance,2) }) -join ' '
+      Line 'Cyan' ("SHARDS {0}" -f $stxt)
+    }
     Line 'DarkCyan' ("PULSE alive | bal `${0} | all_no `${1} (n={2}) | lanes `${3} (n={4}) | TOTAL `${5} | acct `${6} | lanes {7} on | uptime {8}m | boots {9}" -f (BalTxt $lastBal), (BalTxt $lastPnl), ($(if ($nb) { $nb.book.entries } else { '?' })), (BalTxt $lastLanePnl), $lastLaneCount, $totPnl, ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60), $boots)
   }
 
