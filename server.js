@@ -2798,6 +2798,17 @@ if (p === '/api/calibration') {
   return json(res, snap);
 }
   if (p === '/api/shards') return json(res, { cash: LO.cash(), shards: LO.shards ? LO.shards() : [] });
+  if (p === '/api/ops/seed-cash' && method === 'POST') {
+    // OPERATOR OVERRIDE: allow the engine to size orders using a known-good
+    // cash figure when the LIVE key is rate-throttled or fetch-layer rot
+    // prevents a fresh balance read. Sizing clamps remain hard and absolute.
+    const b = await readBody(req);
+    const dollars = Number(b.dollars);
+    if (!Number.isFinite(dollars) || dollars < 0 || dollars > 100000) return json(res, { error: 'body needs dollars in [0, 100k]' }, 400);
+    const r = LO.seedCash ? LO.seedCash(dollars) : { ok: false, error: 'engine has no seedCash' };
+    log('live_cash_seed', { dollars, ok: r.ok, source: r.source, error: r.error });
+    return json(res, r);
+  }
   if (p === '/api/ops/transfer' && method === 'POST') {
     // LOOPBACK OPS: move cash between exchange shards through the engine's warm
     // API pool (fresh-process probes get tarpitted). Empirics: crypto markets

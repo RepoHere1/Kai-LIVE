@@ -679,6 +679,22 @@ function pendingExposure() {
     usableCash,
     cashAgeMs: () => (bal.cash_at ? Date.now() - bal.cash_at : null),
     cashError: () => bal.error,
+    // OPERATOR OVERRIDE (2026-11-05): when the LIVE key is rate-throttled or
+    // the fetch layer is in a transient flap wave, a known-good account balance
+    // can be seeded manually. Sizing is still clamped to ORDER_MAX_DOLLARS per
+    // order and max_qty per lane, so a conservative seed (e.g. $35 against a
+    // $36.49 account) cannot produce an oversized bet. A seeded value does NOT
+    // disable the normal balance poller; the next successful read replaces it.
+    seedCash: (dollars) => {
+      const d = Number(dollars);
+      if (!Number.isFinite(d) || d < 0) return { ok: false, error: 'bad dollars' };
+      bal.cash = d;
+      bal.cash_at = Date.now();
+      bal.source = 'operator_seed';
+      bal.error = null;
+      scheduleBalance();
+      return { ok: true, cash: d, source: 'operator_seed' };
+    },
     pendingExposure,
     refreshIfStale: async () => { if (Date.now() - bal.at > BALANCE_RECONCILE_MS) scheduleBalance(); },
     refreshSnapshot: readBalance,
