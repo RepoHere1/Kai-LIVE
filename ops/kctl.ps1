@@ -27,7 +27,7 @@ $ServerJs = Join-Path $C.Dir 'server.js'
 # Mirror fits in 256 (settles ~290MB commit). The watchdog restarts BOTH books
 # through THIS file, so a single hardcoded cap rearms LIVE's OOM bomb on every
 # watchdog restart.
-$HeapCap = if ($Srv -eq 'live') { 448 } else { 256 }
+$HeapCap = if ($Srv -eq 'live') { 640 } else { 256 } # LIVE 448->640 (2026-11-05: OOM at 448 in 18min during flap waves; 640 fits 3.0GB commit headroom)
 $Node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) { $Node = 'C:\Program Files\nodejs\node.exe' }
 

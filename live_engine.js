@@ -340,23 +340,40 @@ function pendingExposure() {
   }
 
   // Kalshi collateral is per exchange shard. The shard the market lives on must hold the cost
-  // before the order posts, so top it up from the primary shard (0) when needed.
+  // before the order posts. 2026-11-05 FIX: the account had ~$4.29 stranded on shard 2 while
+  // shard 0 (the elections engine's home) was dry — the old code could only push 0 -> N and
+  // gave up when 0 was empty. Now the transfer SOURCES from the richest other shard, so
+  // stranded collateral always flows toward wherever the engine actually trades.
+  function richestOtherShard(exclude, needDollars) {
+    let best = null, bestBal = 0;
+    for (const b of (bal.breakdown || [])) {
+      if (b.exchange_index === exclude) continue;
+      if (Number.isFinite(b.balance) && b.balance > bestBal) { bestBal = b.balance; best = b.exchange_index; }
+    }
+    return best != null && bestBal >= Math.min(needDollars, 0.5) ? { idx: best, bal: bestBal } : null;
+  }
   async function fundShard(target, dollarsNeeded) {
     if (shardBalance(target) >= dollarsNeeded) return { ok: true, moved: 0 };
+    const short = Math.ceil((dollarsNeeded - shardBalance(target)) * 100) / 100;
+    let srcIdx = 0;
     if (target === 0) {
-      return { ok: false, reason: 'primary shard has $' + shardBalance(0).toFixed(2) + ', needs $' + dollarsNeeded.toFixed(2) };
+      const alt = richestOtherShard(0, short);
+      if (!alt) return { ok: false, reason: 'primary shard has $' + shardBalance(0).toFixed(2) + ', needs $' + dollarsNeeded.toFixed(2) + ', no funded shard to pull from' };
+      srcIdx = alt.idx;
+    } else if (shardBalance(0) < short) {
+      const alt = richestOtherShard(target, short);
+      if (!alt) {
+        return { ok: false, reason: 'shard 0 has $' + shardBalance(0).toFixed(2) + ', needs $' + short.toFixed(2) + ' for shard ' + target + ', no other funded shard' };
+      }
+      srcIdx = alt.idx;
     }
-    const amount = Math.ceil((dollarsNeeded - shardBalance(target)) * 100) / 100;
-    if (shardBalance(0) < amount) {
-      return { ok: false, reason: 'shard 0 has $' + shardBalance(0).toFixed(2) + ', needs $' + amount.toFixed(2) + ' for shard ' + target };
-    }
-    log('live_shard_transfer', { from: 0, to: target, dollars: amount });
-    await kalshi.transferBetweenShards(amount, 0, target);
+    log('live_shard_transfer', { from: srcIdx, to: target, dollars: short });
+    await kalshi.transferBetweenShards(short, srcIdx, target);
     // Transfers settle asynchronously. Poll the balance until the shard shows the money.
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       await readBalance();
-      if (shardBalance(target) >= dollarsNeeded) return { ok: true, moved: amount };
+      if (shardBalance(target) >= dollarsNeeded) return { ok: true, moved: short };
     }
     return { ok: false, reason: 'transfer to shard ' + target + ' not settled after 60 seconds' };
   }
@@ -530,6 +547,10 @@ function pendingExposure() {
     const body = {
       ticker: q.ticker,
       client_order_id: crypto.randomUUID(),
+      // Per Kalshi docs (batch-cancel auto-route note): market_ticker +
+      // exchange_index routes to the right shard; -1 = auto-route. The
+      // market's own exchange_index from the quote is authoritative.
+      exchange_index: Number.isInteger(q.exchange_index) ? q.exchange_index : -1,
       side: side === 'YES' ? 'bid' : 'ask',
       count: qty.toFixed(2),
       price: yesPrice.toFixed(2),
@@ -665,10 +686,13 @@ function pendingExposure() {
     // endpoints get tarpitted after rate-limit storms; the server's warm pool
     // does not. Ops transfers run through THIS process.
     shards: () => (bal.breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) })),
-    transferToShard: async (target, dollars) => {
-      const response = await kalshi.transferBetweenShards(dollars, 0, target);
+    // from: optional source shard (default 0). Needed for PULL-BACK consolidation
+    // (e.g. stranded crypto-shard cash -> shard 0 where the elections engine trades).
+    transferToShard: async (target, dollars, from) => {
+      const src = Number.isInteger(from) ? from : 0;
+      const response = await kalshi.transferBetweenShards(dollars, src, target);
       await readBalance();
-      return { response, shards: (bal.breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) })) };
+      return { response, from: src, to: target, shards: (bal.breakdown || []).map((x) => ({ exchange_index: x.exchange_index, balance: num(x.balance) })) };
     },
     openEntry,
     reconcile,

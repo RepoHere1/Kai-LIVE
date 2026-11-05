@@ -84,6 +84,7 @@ function create(deps) {
   const buckets = new Map();     // key -> { n, wins }
   const pending = new Map();     // "ticker|side" -> shadow row (unsettled)
   let booted = false;
+  let INIT_STATE = null;
 
   function key(asset, horizon, side, claimed) {
     const b = bucketOf(claimed);
@@ -229,6 +230,24 @@ function create(deps) {
   async function init() {
     if (booted || !dbRun) return;
     booted = true;
+    // 2026-11-05 SILENT-DEATH FIX: init completed-or-died with ZERO log lines on
+    // every LIVE boot (grep 'calib' in server.log = 0). No success log, no catch
+    // log = an await that never resolves. Now: every stage is logged, a 90s
+    // stall alarm fires, and the stage is exposed via snapshot().init_status so
+    // /api/calibration always shows where init stands.
+    const stage = { at: 'start', t0: Date.now(), status: 'running', hist: null, inserted: null, err: null };
+    INIT_STATE = stage;
+    const say = (s, extra) => {
+      stage.at = s;
+      try { console.error('[calibration] stage=' + s + (extra ? ' ' + JSON.stringify(extra) : '')); } catch (e) {}
+      try { log('calibration_boot', Object.assign({ stage: s, ms: Date.now() - stage.t0 }, extra || {})); } catch (e) {}
+    };
+    say('start', { conn: deps.dbFile ? 'dedicated' : 'shared' });
+    const stallAlarm = setInterval(() => {
+      if (stage.status !== 'running') { clearInterval(stallAlarm); return; }
+      try { console.error('[calibration] STALLED at stage=' + stage.at + ' for ' + Math.round((Date.now() - stage.t0) / 1000) + 's'); } catch (e) {}
+    }, 90000);
+    try {
     await dbRun(`CREATE TABLE IF NOT EXISTS calibration (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ts TEXT NOT NULL,
@@ -309,6 +328,17 @@ function create(deps) {
           FROM trades
           WHERE exit_reason = 'settled' AND exit_price IN (0, 1)
             AND entry_price IS NOT NULL`);
+        stage.hist = (hist || []).length;
+        if (!(hist || []).length) {
+          // Loud diagnostic when the source is empty: is it the filter or the table?
+          const tot = await allRetry(`SELECT
+            (SELECT COUNT(*) FROM trades) AS trades,
+            (SELECT COUNT(*) FROM trades WHERE exit_reason='settled') AS settled,
+            (SELECT COUNT(*) FROM trades WHERE exit_price IN (0,1)) AS zero_one`).catch(() => null);
+          say('hist-empty', tot && tot[0]);
+        } else {
+          say('hist', { available: hist.length });
+        }
         let n = 0;
         // CHUNKED inserts: LIVE's boot write-storm holds the lock in bursts;
         // single-row inserts starve (12 rows in 2 min measured 2026-11-05).
@@ -340,11 +370,15 @@ function create(deps) {
             (ts, market_id, strategy, source, side, asset, horizon, bucket,
              claimed_fair, entry_price, adjusted, outcome, sigma_per_sec, strike)
             VALUES ` + chunk.join(', '), params);
+          stage.inserted = n;
+          if ((i / CH) % 8 === 7) say('chunks', { done: Math.min(i + CH, hist.length), of: hist.length });
         }
+        say('inserts-done', { inserted: n });
         // Rebuild BOTH cache layers from the full ledger: the recorded bucket
         // (claimed or price) plus the price-zone derived from entry_price.
         const all = await allRetry(`SELECT market_id, side, strategy, bucket,
             claimed_fair, entry_price, outcome FROM calibration WHERE outcome IS NOT NULL`);
+        say('rebuild', { ledger_rows: (all || []).length });
         for (const r of all || []) {
           if (r.bucket) bump(r.bucket, r.outcome);
           const pk = pKey(assetOf(r.market_id), horizonOf(r.market_id, r.strategy), r.side || 'NO', r.entry_price);
@@ -355,12 +389,25 @@ function create(deps) {
         // Reload unsettled shadows so a restart does not orphan them.
         const pend = await allRetry(`SELECT * FROM calibration WHERE outcome IS NULL AND source = 'shadow'`);
         for (const p of pend || []) pending.set(p.market_id + '|' + p.side, p);
-        log('calibration_boot', { backfilled: n, ledger_rows: (all || []).length, buckets: buckets.size, pending_shadows: pending.size });
+        stage.status = 'ok';
+        say('done', { backfilled: n, ledger_rows: (all || []).length, buckets: buckets.size, pending_shadows: pending.size });
       } catch (e) {
-        console.error('[calibration] init failed:', e.message);
+        stage.status = 'failed'; stage.err = String(e && e.message || e);
+        try { console.error('[calibration] init failed:', stage.err, 'at stage=' + stage.at); } catch (e2) {}
       } finally {
+        clearInterval(stallAlarm);
+        if (stage.status === 'running') stage.status = 'unknown-exit';
         if (bf) { const b = bf; bf = null; try { b.close(); } catch (e) {} }
       }
+    }
+    // Outer catch: schema statements (CREATE TABLE/INDEX) live outside the
+    // backfill block — a failure there previously vanished silently.
+    } catch (e) {
+      stage.status = 'failed'; stage.err = String(e && e.message || e);
+      try { console.error('[calibration] init failed (schema):', stage.err, 'at stage=' + stage.at); } catch (e2) {}
+    } finally {
+      clearInterval(stallAlarm);
+      if (stage.status === 'running') stage.status = 'unknown-exit';
     }
   }
 
@@ -392,6 +439,34 @@ function create(deps) {
          o.tau != null ? o.tau : null, o.strike != null ? o.strike : null,
          o.spot != null ? o.spot : null]).catch(() => {});
     } catch (e) { /* never break a settle path */ }
+  }
+
+  // SUPERBRAIN LIVE GATE (2026-11-05): the exact, empirical line where the full
+  // stack (calibration vaccine + harvester + certainty lane) may test with REAL
+  // money. Computed purely from this ledger — every number is measured, none
+  // assumed. The mechanics-side flags (first live fill, uptime, shard cash) are
+  // merged by the server's /api/calibration handler.
+  function vaccineGate() {
+    let totN = 0;
+    const mature = [];
+    for (const [k, rec] of buckets) {
+      totN += rec.n;
+      const parts = k.split('|');
+      const c = Number(parts[3] && parts[3].replace('p:', '').replace('c:', ''));
+      if (rec.n >= 40 && Number.isFinite(c)) mature.push({ k, n: rec.n, realized: rec.wins / rec.n, c });
+    }
+    // Efficacy = the average LIE AVOIDED per entry: on mature buckets, buying at
+    // the model's claimed price when reality is `realized` costs (c - realized)
+    // per contract. That is exactly what the gate blocks. n-weighted mean.
+    let wAvoid = 0, wN = 0;
+    for (const m of mature) { wAvoid += (m.c - m.realized) * m.n; wN += m.n; }
+    return {
+      outcomes_total: totN,
+      buckets_mature_n40: mature.length,
+      avoided_loss_cents_per_entry: wN ? Number((100 * wAvoid / wN).toFixed(1)) : null,
+      ready: totN >= 300 && mature.length >= 10,
+      criteria: 'ledger >= 300 outcomes AND >= 10 buckets with n >= 40 (then: mechanics checklist)',
+    };
   }
 
   // ---------------------------------------------------------------------
@@ -426,6 +501,11 @@ function create(deps) {
     }
     return {
       k_prior: K, pending_shadows: pending.size,
+      init_status: INIT_STATE ? {
+        stage: INIT_STATE.at, status: INIT_STATE.status, ms: Date.now() - INIT_STATE.t0,
+        hist_available: INIT_STATE.hist, inserted: INIT_STATE.inserted, err: INIT_STATE.err,
+      } : null,
+      vaccine_gate: vaccineGate(),
       buckets: out.slice(0, 60),
       summary: {
         rows: totN, win_rate: totN ? Number((totWins / totN).toFixed(4)) : null,

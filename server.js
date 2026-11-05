@@ -784,6 +784,18 @@ function defaultState() {
       max_hold_pct: 0.8,
       scan_interval_ms: 10000
     },
+    // CERTAINTY LANE runtime overrides (certainty.js DEFAULTS fill the rest;
+    // certaintyCfg() re-clamps min_prob>=0.90 etc. so this can never loosen
+    // the lane). $1 SUPERBRAIN TEST (2026-11-05): arm = POST /api/config
+    // {"certainty":{"enabled":true}} + POST /api/strategy/certainty/toggle
+    // {"running":true}. Hard math: engine ORDER_MAX_DOLLARS=$0.50 x max_qty=2
+    // => $1.00 max exposure; max_concurrent=1.
+    certainty: {
+      enabled: false,
+      max_concurrent: 1,
+      max_qty: 2,
+    },
+
 maker_only: true 
   },
   // Lane-specific configurations - self-aware trading logic per lane
@@ -2509,36 +2521,16 @@ function strategyForSeries(series) {
 // ---------------------------------------------------------------------------
 async function postAllNoOrder(position, action, exit_price) {
   // Post a real Kalshi NO-side order for the ALL NO MARKETS book.
-  // DRY mode: paper only - never posts real orders.
-  // LIVE mode: posts real orders to Kalshi.
+  // 2026-11-05 FIX: the old body posted to the REMOVED V1 /portfolio/orders
+  // endpoint (removed 2026-02-11, no `type` field; this body also carried
+  // non-Kalshi fields and called raw() with the wrong argument order). Real
+  // order flow lives in live_engine (placeOrderV2 on /portfolio/events/orders
+  // with per-market exchange_index routing). This stub now refuses loudly
+  // instead of posting a malformed order with real money.
   if (state.mode !== 'live') return null;
-  try {
-    const side = 'NO';
-    const qty = position.quantity;
-    const price = action === 'enter' ? position.entry_price : exit_price;
-    const expiration = position.expiration;
-    const marker = crypto.randomBytes(6).toString('hex');
-    const route = '/portfolio/orders';
-    const body = JSON.stringify({
-      marker,
-      side,
-      quantity: qty,
-      price: price,
-      expiration,
-      option_type: 'binary',
-      taker: side,
-    });
-    const ts = Math.round(Date.now() / 1000);
-    const method = 'POST';
-    const fullPath = '/trade-api/v2' + route;
-    const signature = sign(kalshi.accounts.dry, method, fullPath, ts, 'pss');
-    const res = await kalshi.raw(method, route, body, { 'x-kalshi-ts': String(ts), 'x-kalshi-signature': signature, 'content-type': 'application/json' });
-    log('all_no_order', { id: position.id, action, status: res.status, marker });
-    return { ok: true, status: res.status, marker };
-  } catch (e) {
-    log('all_no_order_error', { id: position.id, action, error: String(e.message || e) });
-    return { ok: false, error: String(e.message || e) };
-  }
+  const reason = 'v1 endpoint removed; all-no live orders must route via live_engine.placeOrderV2';
+  log('all_no_order_rejected', { id: position.id, action, reason });
+  return { ok: false, error: reason };
 }
 
 // ---------------------------------------------------------------------------
@@ -2706,6 +2698,27 @@ async function handle(req, res) {
     // source and age, or an honest null with the error.
     return json(res, { ok: true, safe_mode: !!state.safe_mode, state_source: state.state_source || 'primary', boots: state.boot_count || 0, pid: process.pid,
       mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
+      // TAPE BLOCK (operator order 2026-11-05): the watchdog heartbeat prints
+      // this so the tape shows vaccine + shard + gate + memory state every
+      // minute. All in-memory, zero awaits — health stays fast.
+      tape: (() => {
+        try {
+          const cs = CALIB.snapshot();
+          const shards = LO.shards ? LO.shards() : [];
+          const mu = process.memoryUsage();
+          const gate = cs.vaccine_gate || {};
+          const zero = (shards.find((x) => x.exchange_index === 0) || {}).balance || 0;
+          const ist = cs.init_status || {};
+          return {
+            calib: ist.status ? (ist.status + '@' + ist.stage + (ist.inserted != null ? '+' + ist.inserted : '')) : 'off',
+            vac_n: gate.outcomes_total || 0, vac_mature: gate.buckets_mature_n40 || 0,
+            vac_ready: !!gate.ready, vac_avoided_c: gate.avoided_loss_cents_per_entry,
+            superbrain_go: !!(gate.ready && zero >= 3),
+            shards: shards.map((x) => x.exchange_index + ':' + (Number(x.balance) || 0).toFixed(2)).join(','),
+            heap_mb: Math.round(mu.heapUsed / 1048576), rss_mb: Math.round(mu.rss / 1048576),
+          };
+        } catch (e) { return { error: String(e.message || e) }; }
+      })(),
       hosts: { kalshi_live: kalshi.LIVE_BASE, kalshi_demo: kalshi.DEMO_BASE, spot: 'api.exchange.coinbase.com', llm: ENV.KILO_BASE_URL },
       // 2026-11-04 (audit item, operator order): health NEVER prints raw key
       // IDs - first 8 chars only. A health endpoint is screenshot-friendly.
@@ -2758,22 +2771,50 @@ async function handle(req, res) {
   if (p === '/api/config') return json(res, { ok: true, runtime: state.runtime });
 // THE VACCINE — empirical calibration snapshot (2026-11-04): buckets,
 // realized-vs-claimed bias, pending shadows. Read-only.
-if (p === '/api/calibration') return json(res, CALIB.snapshot());
+if (p === '/api/calibration') {
+  const snap = CALIB.snapshot();
+  // SUPERBRAIN LIVE GATE: vaccine side is computed inside CALIB (pure ledger
+  // math); the mechanics side needs engine truth (shard cash, boots). Both
+  // merge here so /api/calibration is the single go/no-go surface.
+  try {
+    const shards = LO.shards ? LO.shards() : [];
+    const zero = (shards.find((x) => x.exchange_index === 0) || {}).balance || 0;
+    snap.superbrain_live_gate = {
+      vaccine: snap.vaccine_gate,
+      mechanics: {
+        shard_cash: shards,
+        engine_shard_usd: Number(zero.toFixed(2)),
+        engine_shard_funded: zero >= 3,
+        boot_count: state.boot_count || 0,
+      },
+      manual_checklist: [
+        'LIVE survives >= 6h at 640MB heap without OOM (leak check)',
+        'first real fill: no exchange_index bounce, settlement lands in ledger',
+      ],
+      protocol_when_ready: 'certainty lane only: $2/contract cap, 1 concurrent position, max 3 entries/day, daily kill at -$3, review after 30 settled entries',
+      go: !!(snap.vaccine_gate && snap.vaccine_gate.ready && zero >= 3),
+    };
+  } catch (e) { snap.superbrain_live_gate = { error: String(e.message || e) }; }
+  return json(res, snap);
+}
   if (p === '/api/shards') return json(res, { cash: LO.cash(), shards: LO.shards ? LO.shards() : [] });
   if (p === '/api/ops/transfer' && method === 'POST') {
     // LOOPBACK OPS: move cash between exchange shards through the engine's warm
     // API pool (fresh-process probes get tarpitted). Empirics: crypto markets
     // live on shard 2 (KXXRP/KXBTC live_order_placed logs, 2026-11-03).
+    // `from` (optional, default 0) enables PULL-BACK: stranded shard-2 cash
+    // can flow home to shard 0 where the elections engine trades.
     const b = await readBody(req);
     const to = Number.isInteger(b.to) ? b.to : null;
+    const from = Number.isInteger(b.from) ? b.from : 0;
     const dollars = Number(b.dollars);
-    if (to == null || to < 0 || !(dollars > 0) || dollars > 50) return json(res, { error: 'body needs integer "to" shard and "dollars" in (0, 50]' }, 400);
+    if (to == null || to < 0 || from < 0 || to === from || !(dollars > 0) || dollars > 50) return json(res, { error: 'body needs integer "to" != "from" shards and "dollars" in (0, 50]' }, 400);
     try {
-      const r = await LO.transferToShard(to, dollars);
-      log('live_shard_transfer', { from: 0, to, dollars, via: 'ops_endpoint' });
+      const r = await LO.transferToShard(to, dollars, from);
+      log('live_shard_transfer', { from, to, dollars, via: 'ops_endpoint' });
       return json(res, r);
     } catch (e) {
-      log('live_shard_transfer_failed', { to, dollars, error: String(e.message).slice(0, 200) });
+      log('live_shard_transfer_failed', { from, to, dollars, error: String(e.message).slice(0, 200) });
       return json(res, { error: String(e.message).slice(0, 300) }, 502);
     }
   }
@@ -3603,7 +3644,10 @@ async function runCertaintyPass() {
     const best = certainty.bestCandidate(re);
     if (!best || !best.ok) { ls.skips++; ls.last_skip = 're-verification refused: ' + (best ? best.reason : 'no candidate'); continue; }
     const lane = { name: 'certainty', horizon: 'certainty', spot: c.asset };
-    log('certainty_order', { market_id: best.ticker, side: best.side, px: best.price, prob: best.prob, margin: best.margin, tau: best.tau, z: best.z, fee: best.fee, asset: c.asset });
+    // $1 SUPERBRAIN TEST forensics (2026-11-05): the log carries the order's
+    // shard routing and the full context so the first live fill can be studied
+    // end-to-end from the tape alone.
+    log('certainty_order', { market_id: best.ticker, side: best.side, px: best.price, prob: best.prob, margin: best.margin, tau: best.tau, z: best.z, fee: best.fee, asset: c.asset, shard: Number.isInteger(q.exchange_index) ? q.exchange_index : -1, vol_per_sec: c.perSecVol, spot: c.spot });
     const rec = await LO.openEntry(lane, q, best.side, best.price, best.prob, best.margin, c.perSecVol, { taker: true, maxQty: cfg.max_qty });
     if (rec) {
       ls.entries++;
