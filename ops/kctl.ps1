@@ -22,10 +22,11 @@ $Map = @{
 $C = $Map[$Srv]
 $PidFile = Join-Path $C.Dir 'kai.pid'
 $ServerJs = Join-Path $C.Dir 'server.js'
-# HEAP CAP (2026-11-04, per-server): LIVE needs 448 (real working set ~556MB
-# commit, ~370MB old-space; 256 OOM-boot-looped it). Mirror fits in 256.
-# Both books can be restarted through either repo's kctl, so the cap is
-# resolved per-server, never hardcoded.
+# HEAP CAP (2026-11-04, per-server): LIVE's real working set is ~556MB commit
+# (~370MB old-space) - a 256 cap OOM-boot-looped it (boots 61->64 in 60s).
+# Mirror fits in 256 (settles ~290MB commit). The watchdog restarts BOTH books
+# through THIS file, so a single hardcoded cap rearms LIVE's OOM bomb on every
+# watchdog restart.
 $HeapCap = if ($Srv -eq 'live') { 448 } else { 256 }
 $Node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) { $Node = 'C:\Program Files\nodejs\node.exe' }
@@ -90,8 +91,16 @@ function Get-PortOwner([int]$Port) {
   # to Get-NetTCPConnection, but ESTABLISHED rows on the server port always
   # carry the real owner PID (proven 2026-11-04: 8787 -> 5232, 8788 -> 2236).
   # Only the server side of a connection has the server port as LOCAL port.
+  # HANG LAW (2026-11-04 incident): netstat itself wedged for 40+ minutes on
+  # this machine during a TCP-table flood, which hung kctl, which hung the
+  # watchdog (Start-Process -Wait) with it, and both books stayed down. The
+  # fallback is now bounded: 5 seconds in a job, else give up (0 = unknown,
+  # which never kills anything).
   try {
-    $lines = netstat -ano -p TCP 2>$null
+    $nsJob = Start-Job -ScriptBlock { param($p) netstat -ano -p TCP 2>$null } -ArgumentList $Port
+    $lines = @()
+    if (Wait-Job $nsJob -Timeout 5) { $lines = @(Receive-Job $nsJob) } else { Stop-Job $nsJob -Force }
+    Remove-Job $nsJob -Force -ErrorAction SilentlyContinue
     foreach ($l in $lines) {
       if ($l -match "^\s*TCP\s+\S*:$Port\s+\S+\s+(LISTENING|ESTABLISHED)\s+(\d+)\s*$") { return [int]$Matches[2] }
     }
@@ -256,10 +265,16 @@ function Do-Start {
     -RedirectStandardOutput (Join-Path $C.Dir 'server.log') `
     -RedirectStandardError  (Join-Path $C.Dir 'server.err')
   Set-Content -Path $PidFile -Value $proc.Id -Encoding ascii
+  # BOOT VERIFY = PORT LISTENING, not /api/health (2026-11-04 incident): the
+  # health handler can stall on external Kalshi calls during the machine's
+  # outbound flap waves, so HTTP-probing a booting server burned 5s per try
+  # (20 tries = 110s+) and pushed watchdog restarts past their 180s cap. The
+  # port accepting TCP IS the boot-complete signal; health remains the
+  # watchdog's liveness signal afterwards.
   $ok = $false
-  for ($i = 0; $i -lt 20; $i++) {
-    Start-Sleep -Milliseconds 500
-    if (Test-Http $C.Port 5) { $ok = $true; break }
+  for ($i = 0; $i -lt 90; $i++) {
+    Start-Sleep -Seconds 1
+    if (Test-PortListening $C.Port) { $ok = $true; break }
   }
   if ($ok) {
     $owned = Get-OwnedPid
