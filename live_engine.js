@@ -44,12 +44,76 @@ function create(deps) {
   const pendingEntries = () => orders().filter((o) => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling'));
 
   // ---- balance: REST, only when something moved --------------------------------------------
-  const bal = { at: 0, cash: null, cash_at: 0, breakdown: [], portfolio_value: null, error: null, backoff_ms: 150 * 1000 };
+  const bal = { at: 0, cash: null, cash_at: 0, breakdown: [], portfolio_value: null, error: null, backoff_ms: 150 * 1000, not_before: 0, attempts: [] };
   let balInflight = null;
   let balTimer = null;
   let balDirty = false;
 
+  // ---- CASH LEDGER (2026-11-06, the 429-storm kill) -------------------------------------------
+  // Kalshi WS v2 has NO balance channel (verified 2026-11-04: code 8 "Unknown
+  // channel name"), so cash cannot be pushed - it must be READ. And reads were
+  // demanded by EVERYTHING: every fill event, every engine tick (lane heat
+  // check), every dashboard refresh, an unconditional 5-min reconcile. When
+  // Kalshi 429s, that demand pile becomes a storm that starves the engine
+  // exactly when it has positions to manage (observed 2026-11-03: a full day
+  // of "no live cash" skips; 2026-11-06: 429s + 20s timeouts at boot).
+  //
+  // THE FIX: the balance is COMPUTED, not polled. Anchor once from any
+  // confirmed truth (REST 200 / WS push / operator seed), then apply every
+  // money event at the same chokepoints that book positions and trades -
+  // entry fills (syncEntry), exit fills (bookLiveExit in server.js),
+  // settlements (closeLivePosition in server.js). Shard transfers are
+  // cash-neutral. REST becomes a VALIDATOR: one jittered, single-flight,
+  // negative-cached read only when unanchored, on reconnect, when the anchor
+  // ages out, or on operator demand. Fills, ticks, and display paths can no
+  // longer cause reads - a 429 storm now costs AT MOST a few probes/hour and
+  // trading keeps running on the ledger.
+  //
+  // Blast-radius law: every order is already hard-capped ($1.00
+  // ORDER_MAX_DOLLARS, qty caps, CASH_BUFFER), so even a wrong ledger number
+  // can only mis-size by cents. Unanchored = unknown = no sizing (unchanged
+  // operator law - a persisted snapshot is still never money).
+  const LEDGER_MAX_EVENTS = 500;
+  const LEDGER_ANCHOR_REFRESH_MS = 30 * 60 * 1000;   // REST re-anchor at most ~2x/hour
+  const LEDGER_STALE_ANCHOR_MS = 6 * 60 * 60 * 1000; // older anchor flags 'stale' (caps still bound risk)
+  const cashLedger = { anchorCash: null, anchorAt: 0, anchorSource: null, events: [], divergence: null, divergenceAt: 0 };
+
+  function ledgerCash() {
+    if (cashLedger.anchorCash == null) return null;
+    let v = cashLedger.anchorCash;
+    for (const e of cashLedger.events) v += e.d;
+    return Number(v.toFixed(4));
+  }
+
+  function ledgerEvent(delta, tag) {
+    const d = Number(delta);
+    if (!Number.isFinite(d) || d === 0) return;
+    cashLedger.events.push({ d: Number(d.toFixed(4)), tag: String(tag || '').slice(0, 48), at: Date.now() });
+    if (cashLedger.events.length > LEDGER_MAX_EVENTS) cashLedger.events.shift();
+  }
+
+  // A confirmed truth (REST 200 / WS push / operator seed) re-anchors the
+  // ledger. The gap between what the ledger predicted and the truth is drift:
+  // a money event we missed (manual trade, deposit, unbooked settlement).
+  // Recorded and alarmed - never silently absorbed.
+  function reanchorCash(cash, source) {
+    const c = Number(cash);
+    if (!Number.isFinite(c)) return;
+    const predicted = ledgerCash();
+    if (predicted != null && Math.abs(predicted - c) >= 0.5) {
+      cashLedger.divergence = Number((c - predicted).toFixed(4));
+      cashLedger.divergenceAt = Date.now();
+      log('cash_ledger_divergence', { predicted, truth: c, source, events: cashLedger.events.length });
+    }
+    cashLedger.anchorCash = c;
+    cashLedger.anchorAt = Date.now();
+    cashLedger.anchorSource = source;
+    cashLedger.events = [];
+  }
+
   async function readBalanceNow() {
+    bal.attempts.push(Date.now());
+    bal.attempts = bal.attempts.filter((t) => Date.now() - t < 3600 * 1000);
     try {
       // HARD TIMEOUT (2026-11-04): a stalled response body can outlive fetch's
       // AbortSignal in undici, leaving balInflight settled-never. Every later
@@ -69,7 +133,9 @@ function create(deps) {
       bal.at = Date.now();
       bal.cash_at = Date.now();       // the read that produced this cash
       bal.backoff_ms = 150 * 1000;    // a successful read resets the backoff
+      bal.not_before = 0;             // negative cache cleared by success
       bal.source = 'rest';            // provenance: this number came from REST
+      reanchorCash(bal.cash, 'rest'); // CASH LEDGER: confirmed truth re-anchors
       const s = st();
       if (s.live) {
         s.live.last_balance = { cash: bal.cash, breakdown: bal.breakdown, portfolio_value: bal.portfolio_value, at: bal.at };
@@ -86,15 +152,19 @@ function create(deps) {
       // on stale money. The last good value stays in state.live.last_balance for the page,
       // which flags it as STALE (429). Removing this restore fixed oversized orders that used
       // the old $12.64 number while the real account had less.
-      if (/429/.test(bal.error)) {
-        // EXPONENTIAL backoff. A 60s retry ping-ponged with other pollers at
-        // the rate limit and sustained the 429 loop indefinitely. 150 -> 300
-        // -> 600s (capped). A rate-limited read is cheap; a starved engine
-        // that never trades is not.
-        bal.backoff_ms = Math.min(1800 * 1000, (bal.backoff_ms || 150 * 1000) * 2);
-        bal.backoff_until = Date.now() + bal.backoff_ms;
-        setTimeout(() => scheduleBalance(), bal.backoff_ms + 500);
-      }
+      // FAILURE BACKOFF (2026-11-06 rework, the storm kill): every failure
+      // sets a NEGATIVE-CACHE deadline (bal.not_before) that ALL scheduled
+      // reads respect, so expiring demand can no longer pile into a herd.
+      // Jitter (+-25%) desynchronizes any would-be herd. When the ledger is
+      // ANCHORED a failed validator is urgency-free (trading runs on the
+      // ledger), so probing restarts gently at ~2 min; only an UNANCHORED
+      // ledger (bootstrap starvation) keeps the conservative ladder.
+      const anchored = cashLedger.anchorCash != null;
+      if (anchored) bal.backoff_ms = Math.max(60 * 1000, Math.min(bal.backoff_ms || 120 * 1000, 120 * 1000));
+      else bal.backoff_ms = Math.min(1800 * 1000, (bal.backoff_ms || 150 * 1000) * 2);
+      const wait = Math.round(bal.backoff_ms * (0.75 + Math.random() * 0.5));
+      bal.not_before = Date.now() + wait;
+      setTimeout(() => scheduleBalance(), wait + 250);
     }
     return bal;
   }
@@ -104,15 +174,32 @@ function create(deps) {
     return balInflight;
   }
 
-  // Throttled: at most one REST balance read per BALANCE_MIN_GAP_MS, with one pending read queued.
+  // Throttled single-flight validator. Respects the negative-cache deadline
+  // (bal.not_before) and the min gap; every caller collapses into the ONE
+  // in-flight read (readBalance single-flights), so no amount of calling
+  // this can ever produce a storm.
   function scheduleBalance() {
-    if (balTimer) { balDirty = true; return; }
-    const wait = Math.max(0, BALANCE_MIN_GAP_MS - (Date.now() - bal.at), (bal.backoff_until || 0) - Date.now());
+    if (balInflight) return;                    // one read in the air, period
+    if (balTimer) { balDirty = true; return; }  // already scheduled; fold demand in
+    const wait = Math.max(0,
+      BALANCE_MIN_GAP_MS - (Date.now() - bal.at),
+      (bal.not_before || 0) - Date.now()
+    ) + Math.round(Math.random() * 1500);       // spread arrivals
     balTimer = setTimeout(async () => {
       balTimer = null;
-      await readBalance();
+      if (balInflight) { balDirty = true; }
+      else await readBalance();
       if (balDirty) { balDirty = false; scheduleBalance(); }
     }, wait);
+  }
+
+  // Fill-burst collapse: WS fill/position events used to fire an immediate
+  // REST read EACH. The ledger already applied the fill's cash delta at the
+  // booking chokepoint, so a burst now schedules ONE deferred validator.
+  let ledgerCheckTimer = null;
+  function scheduleLedgerCheck() {
+    if (ledgerCheckTimer) return;
+    ledgerCheckTimer = setTimeout(() => { ledgerCheckTimer = null; scheduleBalance(); }, 45 * 1000);
   }
 
   // ---- usable cash ---------------------------------------------------------------------------
@@ -123,9 +210,21 @@ function create(deps) {
   // to trust a stale number blindly - it is to know HOW OLD the number is and
   // to bound every order by an absolute dollar cap so a stale figure can
   // never produce an oversized bet.
-  const CASH_TRUST_MS = 20 * 60 * 1000;   // a cash figure older than this is not money
+  const CASH_TRUST_MS = 20 * 60 * 1000;   // a direct read older than this is not primary truth
   function usableCash() {
     const now = Date.now();
+    const lc = ledgerCash();
+    if (lc != null) {
+      const anchorAge = now - cashLedger.anchorAt;
+      return {
+        cash: lc,
+        source: 'ledger',
+        anchor_source: cashLedger.anchorSource,
+        anchor_age_ms: anchorAge,
+        events: cashLedger.events.length,
+        stale: anchorAge > LEDGER_STALE_ANCHOR_MS,
+      };
+    }
     if (bal.cash != null) {
       const age = bal.cash_at ? now - bal.cash_at : null;
       return { cash: bal.cash, stale: age == null || age > CASH_TRUST_MS, age_ms: age, source: 'live_read' };
@@ -133,8 +232,9 @@ function create(deps) {
     // ERADICATED (operator order 2026-11-04): this used to fall back to the
     // PERSISTED state.live.last_balance for up to 20 minutes after a restart -
     // the last snapshot leak. A number no live source confirmed in THIS
-    // process is not money: cash unknown = no sizing, no exceptions. The boot
-    // and WS-connect reads fill it within seconds of a healthy start.
+    // process is not money: cash unknown = no sizing, no exceptions. The
+    // ledger above is NOT a persisted snapshot - it is anchored in THIS
+    // process by a confirmed read and updated only by booked money events.
     return null;
   }
 
@@ -172,7 +272,14 @@ function create(deps) {
     if (!ev) return;
     if (ev.type === 'connected') { readBalance(); readEventPositions(); seedRestingOrders(); return; }
     if (ev.type === 'balance') { applyStreamBalance(ev.msg); return; }
-    if (ev.type === 'fill' || ev.type === 'position') scheduleBalance();
+    // FILLS NO LONGER TRIGGER READS (2026-11-06 storm kill): the ledger
+    // already applied the fill's cash delta at the booking chokepoint. WS
+    // events only schedule ONE gentle deferred validator per burst - or an
+    // immediate one while still unanchored (bootstrap).
+    if (ev.type === 'fill' || ev.type === 'position') {
+      if (cashLedger.anchorCash == null) scheduleBalance();
+      else scheduleLedgerCheck();
+    }
   }
 
   // ---- balance: the WS push is the primary truth, REST is bootstrap/repair ----
@@ -193,8 +300,9 @@ function create(deps) {
     bal.at = Date.now();
     bal.error = null;
     bal.backoff_ms = 150 * 1000;         // a live push resets the REST ladder
-    bal.backoff_until = 0;
+    bal.not_before = 0;
     bal.source = 'ws';
+    reanchorCash(cash, 'ws');            // CASH LEDGER: a push is confirmed truth
     const s = st();
     if (s.live) {
       s.live.last_balance = { cash: bal.cash, breakdown: bal.breakdown || [], portfolio_value: bal.portfolio_value, at: bal.at, source: 'ws' };
@@ -209,7 +317,16 @@ function create(deps) {
     readBalance();
     readEventPositions();
     seedRestingOrders();
-    setInterval(() => { scheduleBalance(); readEventPositions(); }, BALANCE_RECONCILE_MS);
+    setInterval(() => {
+      // VALIDATOR CADENCE (2026-11-06 storm kill): the unconditional 5-min
+      // balance read is DEAD. REST validates the ledger only when it is
+      // unanchored or the anchor has aged out. The positions read rides
+      // along only when the stream is not freshly alive (the WS keeps
+      // positions true on its own).
+      if (cashLedger.anchorCash == null || Date.now() - cashLedger.anchorAt > LEDGER_ANCHOR_REFRESH_MS) scheduleBalance();
+      const alive = stream.connected && stream.secondsSinceMessage() != null && stream.secondsSinceMessage() < 120;
+      if (!alive) readEventPositions();
+    }, BALANCE_RECONCILE_MS);
   }
 
   // ---- account view (synchronous, from streamed state) -----------------------------------------
@@ -466,6 +583,9 @@ function pendingExposure() {
     pos.qty = Number((pos.qty + deltaQty).toFixed(2));
     pos.cost = Number((pos.cost + deltaCost).toFixed(4));
     pos.fees = Number(((pos.fees || 0) + deltaFees).toFixed(4));
+    // CASH LEDGER: the entry fill's dollars left the account HERE - book the
+    // delta locally instead of triggering a REST balance read.
+    ledgerEvent(-(deltaCost + deltaFees), 'entry_fill:' + rec.ticker);
     save();
   }
 
@@ -680,7 +800,9 @@ function pendingExposure() {
     onStream,
     snapshot,
     kalshiView,
-    cash: () => bal.cash,
+    // Cash surface: the LEDGER is the number (anchor + booked events). A
+    // direct REST/WS figure only surfaces before the first anchor exists.
+    cash: () => { const lc = ledgerCash(); return lc != null ? lc : bal.cash; },
     // THE 429 STARVATION FIX: the server asks for cash it can actually trust,
     // with its age attached, instead of a number that may be null (starved)
     // or silently stale.
@@ -700,13 +822,40 @@ function pendingExposure() {
       bal.cash_at = Date.now();
       bal.source = 'operator_seed';
       bal.error = null;
+      reanchorCash(d, 'operator_seed');
       scheduleBalance();
       return { ok: true, cash: d, source: 'operator_seed' };
     },
     pendingExposure,
-    refreshIfStale: async () => { if (Date.now() - bal.at > BALANCE_RECONCILE_MS) scheduleBalance(); },
+    // Display-safe validator gate: schedules at most one read, only when the
+    // ledger needs re-anchoring, always through the negative cache. Safe to
+    // call from any read path - it can never await or storm.
+    refreshIfStale: async () => { if (cashLedger.anchorCash == null || Date.now() - cashLedger.anchorAt > LEDGER_ANCHOR_REFRESH_MS) scheduleBalance(); },
     refreshSnapshot: readBalance,
     balanceSource: () => bal.source || null,
+    // CASH LEDGER surface: what the engine believes, how it knows, and when
+    // the next REST validation may fire. All memory - zero network.
+    cashReport: () => ({
+      ledger_cash: ledgerCash(),
+      anchor_source: cashLedger.anchorSource,
+      anchor_age_ms: cashLedger.anchorCash != null ? Date.now() - cashLedger.anchorAt : null,
+      events: cashLedger.events.length,
+      last_events: cashLedger.events.slice(-5),
+      divergence: cashLedger.divergence,
+      divergence_age_ms: cashLedger.divergenceAt ? Date.now() - cashLedger.divergenceAt : null,
+      direct_cash: bal.cash,
+      direct_source: bal.source || null,
+      direct_age_ms: bal.cash_at ? Date.now() - bal.cash_at : null,
+      error: bal.error,
+      next_attempt_in_ms: (bal.not_before || 0) > Date.now() ? bal.not_before - Date.now() : null,
+      attempts_last_hour: bal.attempts.length,
+    }),
+    // Money events booked OUTSIDE the engine (exit fills, settlements) apply here.
+    ledgerEvent,
+    // Operator escape hatch: ONE forced read bypassing the negative cache
+    // exactly once (still single-flight). For "I know Kalshi is healthy,
+    // anchor it NOW" moments.
+    syncNow: async () => { bal.not_before = 0; return readBalance(); },
     // Shard cash map + ops transfer. Fresh-process REST probes to the portfolio
     // endpoints get tarpitted after rate-limit storms; the server's warm pool
     // does not. Ops transfers run through THIS process.

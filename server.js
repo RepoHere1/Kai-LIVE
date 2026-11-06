@@ -1409,8 +1409,10 @@ async function quoteForTicker(ticker) {
 // LIVE book - REAL Kalshi account data via portfolio API
 // ---------------------------------------------------------------------------
 async function getLivePortfolio() {
-  // Real Kalshi account snapshot (balance, positions, resting orders), refreshed every 10s.
-  await LO.refreshIfStale();
+  // Real Kalshi account snapshot - MEMORY ONLY (2026-11-06 storm kill):
+  // display paths lost the right to touch the network. The engine's own
+  // validator keeps the cash ledger anchored; a dashboard refresh can never
+  // fire a REST read again.
   return LO.snapshot();
 }
 
@@ -1424,7 +1426,8 @@ function liveRealized() {
 }
 
 async function liveCash() {
-  await LO.refreshIfStale();
+  // Memory only - see getLivePortfolio(). The lane heat check calls this
+  // EVERY tick; it must never queue a REST read.
   return LO.cash();
 }
 
@@ -1546,6 +1549,9 @@ function bookLiveExit(pos, qty, exitPrice, feePerContract, reason) {
     exit_timestamp: new Date().toISOString(), opened: pos.opened, order_id: pos.order_id || null,
   };
   state.live.closed.push(trade);
+  // CASH LEDGER: an exit fill moved cash (proceeds in, exit fee out). Booked
+  // HERE - the single chokepoint every real exit fill passes through.
+  if (LO && LO.ledgerEvent) LO.ledgerEvent(Number((proceeds - exitFees).toFixed(4)), 'exit_fill:' + reason);
   pos.qty = Number((pos.qty - qtyX).toFixed(2));
   pos.cost = Number((pos.cost - costPart).toFixed(4));
   pos.fees = Number(((pos.fees || 0) - entryFees).toFixed(4));
@@ -1579,6 +1585,10 @@ function closeLivePosition(pos, exitPrice, reason, result) {
   if (idx === -1) return;
   state.live.positions.splice(idx, 1);
   const proceeds = Number((pos.qty * exitPrice).toFixed(4));
+  // CASH LEDGER: settlement pays qty x $1 (or $0) with no fee. Only the
+  // 'settled' path has a KNOWN result; 'settled_no_result' books $0 locally
+  // but the real payout is unknown, so the ledger leaves it to the validator.
+  if (reason === 'settled' && LO && LO.ledgerEvent) LO.ledgerEvent(proceeds, 'settlement:' + pos.market_id);
   // FEE REALITY (2026-11-03): the entry fee ALREADY LEFT THE ACCOUNT when the
   // position opened - pos.fees accumulates the real fees_paid_dollars reported
   // by Kalshi on the fill. Settlement is not a trade: Kalshi pays $1.00 and
@@ -2812,6 +2822,10 @@ async function handle(req, res) {
       balance_source: LO.balanceSource ? LO.balanceSource() : null,
       balance_age_ms: LO.cashAgeMs ? LO.cashAgeMs() : null,
       balance_error: LO.cashError ? LO.cashError() : null,
+      // CASH LEDGER (storm kill): what the engine believes cash is, how it
+      // knows (anchor source/age + applied money events), and when the next
+      // REST validation may fire. All memory - zero network.
+      cash_ledger: LO.cashReport ? LO.cashReport() : null,
     });
   }
 
@@ -2882,7 +2896,16 @@ if (p === '/api/calibration') {
   } catch (e) { snap.superbrain_live_gate = { error: String(e.message || e) }; }
   return json(res, snap);
 }
-  if (p === '/api/shards') return json(res, { cash: LO.cash(), shards: LO.shards ? LO.shards() : [] });
+  if (p === '/api/shards') return json(res, { cash: LO.cash(), shards: LO.shards ? LO.shards() : [] })
+ if (p === '/api/ops/sync-cash' && method === 'POST') {
+   // OPERATOR SYNC (2026-11-06 storm kill): ONE forced balance validation -
+   // bypasses the negative cache exactly once, still single-flight. Use when
+   // you know Kalshi is healthy and want the ledger re-anchored NOW.
+   const b = await readBody(req);
+   if (b.force !== true) return json(res, { error: 'refused: body must include force:true' }, 400);
+   const r = await LO.syncNow();
+   return json(res, { ok: !!(r && r.cash != null), report: LO.cashReport ? LO.cashReport() : null, cash: r ? r.cash : null });
+ };
   if (p === '/api/ops/seed-cash' && method === 'POST') {
     // OPERATOR OVERRIDE: allow the engine to size orders using a known-good
     // cash figure when the LIVE key is rate-throttled or fetch-layer rot
