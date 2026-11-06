@@ -19,3 +19,7 @@ trading.db-wal
 trading.db-shm
 
 facts.db-journal
+
+# runtime state backups/temp and generated API snapshots (not source)
+state.json.*
+_tape_snap/

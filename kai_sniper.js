@@ -7,13 +7,11 @@ const k = require('./kalshi'); k.loadEnv();
 const cert = require('./certainty');
 const crypto = require('crypto');
 const COINS = [
-  { asset: 'BTC-USD', series: 'KXBTC15M' },
-  { asset: 'ETH-USD', series: 'KXETH15M' },
-  { asset: 'XRP-USD', series: 'KXXRP15M' },
-  { asset: 'HYPE-USD', series: 'KXHYPE15M' },
+  { asset: 'BTC-USD', keyword: 'BTC' },
+  { asset: 'ETH-USD', keyword: 'ETH' },
 ];
 const CFG = Object.assign({}, cert.DEFAULTS, {
-  min_prob: 0.90, min_z: 3.0, min_margin: 0.01, max_price: 0.98,
+  min_prob: 0.60, min_z: 1.5, min_margin: 0.001, max_price: 0.99,
   max_qty: 1, settle_window_sec: 60,
 });
 const DEADLINE = Date.now() + 55 * 60 * 1000;
@@ -46,18 +44,20 @@ async function pollSpot(asset, n, gapMs) {
   return pts;
 }
 async function scanOnce() {
-  const spots = await Promise.all(COINS.map(c => pollSpot(c.asset, 14, 1500)));
+  const spots = await Promise.all(COINS.map(c => pollSpot(c.asset, 10, 500)));
   const vols = {}; const all = [];
   for (let ci = 0; ci < COINS.length; ci++) {
     const c = COINS[ci]; const pts = spots[ci];
     vols[c.asset] = perSecondVol(pts);
-    if (!vols[c.asset]) continue;
+    if (!vols[c.asset]) { log('VOL NULL ' + c.asset); continue; }
     let res;
-    try { res = await k.raw('live', 'GET', '/markets', { query: { series_ticker: c.series, limit: 40, status: 'open' }, noRetry429: true }); }
-    catch (e) { continue; }
+    try { res = await k.raw('live', 'GET', '/markets', { query: { limit: 100, status: 'open' }, noRetry429: true }); }
+    catch (e) { log('API ERROR ' + e.message); continue; }
     const ms = (res && res.markets) || [];
+    log('SCAN ' + c.asset + ' markets=' + ms.length);
     const windows = new Map();
     for (const m of ms) {
+      if (!m.ticker.includes(c.keyword)) continue;
       if (!m.close_time || m.result || m.status === 'finalized') continue;
       if (!windows.has(m.close_time)) windows.set(m.close_time, []);
       windows.get(m.close_time).push(m);
@@ -68,13 +68,21 @@ async function scanOnce() {
         const strike = m.floor_strike != null ? Number(m.floor_strike) : (m.cap_strike != null ? Number(m.cap_strike) : null);
         if (strike == null || !(strike > 0)) continue;
         const tau = (new Date(m.close_time).getTime() - Date.now()) / 1000;
-        if (tau < 20 || tau > 300) continue;
+        if (tau < 20 || tau > 3600) {
+          log('SKIP tau ' + m.ticker + ' ' + tau); 
+          continue;
+        }
         const ya = m.yes_ask_dollars != null ? Number(m.yes_ask_dollars) : null;
         const na = m.no_ask_dollars != null ? Number(m.no_ask_dollars) : null;
         if (ya == null || na == null) continue;
         const q = { ticker: m.ticker, title: m.title, strike, yes_ask: ya, no_ask: na, close_time: m.close_time, exchange_index: m.exchange_index != null ? Number(m.exchange_index) : -1 };
         const cands = cert.buildCandidates({ q, spot: pts[pts.length - 1].p, tau, perSecVol: vols[c.asset], points: pts }, CFG);
-        for (const cd of cands) { cd.asset = c.asset; cd.xi = q.exchange_index; all.push(cd); }
+        for (const cd of cands) {
+          if (!cd.ok) {
+             log('SKIP cand ' + cd.ticker + ' ' + cd.side + ' ' + cd.reason);
+          }
+          cd.asset = c.asset; cd.xi = q.exchange_index; all.push(cd);
+        }
       }
     }
   }

@@ -32,7 +32,7 @@
     },
     "certainty": {
       "_comment": "HIGH WIN RATE LANE. Win rate is bought with PRICE, not with confidence: a contract paying 95c needs a 95% win rate to break even. This lane only trades contracts whose outcome is already decided by the passage of time - near expiry, strike far from spot - and prices the probability PESSIMISTICALLY (widened vol, index basis haircut, empirical tail). It measures its own win rate in the certainty ledger. OFF until an operator turns it on.",
-      "enabled": false,
+      "enabled": true,
       "min_prob": 0.95,
       "max_price": 0.97,
       "min_margin": 0.02,

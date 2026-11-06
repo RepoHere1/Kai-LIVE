@@ -2716,6 +2716,12 @@ async function handle(req, res) {
             superbrain_go: !!(gate.ready && zero >= 3),
             shards: shards.map((x) => x.exchange_index + ':' + (Number(x.balance) || 0).toFixed(2)).join(','),
             heap_mb: Math.round(mu.heapUsed / 1048576), rss_mb: Math.round(mu.rss / 1048576),
+            open_markets: (cs.open_markets || 0),
+            skips: cs.skips || 0,
+            recent_trades: (cs.recent_trades || []).slice(0, 5),
+            last_event: cs.last_event || 'none',
+            shadows: cs.pending_shadows,
+            shadows_n: cs.pending_shadows_n,
           };
         } catch (e) { return { error: String(e.message || e) }; }
       })(),

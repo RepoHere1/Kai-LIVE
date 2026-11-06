@@ -253,6 +253,7 @@ function certaintyProbability(input) {
   } = input || {};
   const S = Number(spot), K = Number(strike), tau = Number(tauSec), sv = Number(perSecVol);
   if (!(S > 0) || !(K > 0) || !(tau >= 0) || !(sv > 0)) {
+    // console.log('DEBUG uncomputable', S, K, tau, sv);
     return { pYes: null, reason: 'uncomputable' };
   }
   // The settlement value, and how uncertain that estimate is.

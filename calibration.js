@@ -500,7 +500,9 @@ function create(deps) {
       }
     }
     return {
-      k_prior: K, pending_shadows: pending.size,
+      k_prior: K,
+      pending_shadows: Array.from(pending.values()).slice(-5),
+      pending_shadows_n: pending.size,
       init_status: INIT_STATE ? {
         stage: INIT_STATE.at, status: INIT_STATE.status, ms: Date.now() - INIT_STATE.t0,
         hist_available: INIT_STATE.hist, inserted: INIT_STATE.inserted, err: INIT_STATE.err,
