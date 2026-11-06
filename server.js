@@ -3046,6 +3046,44 @@ if (p === '/api/calibration') {
     return json(res, result, result.error ? 400 : 200);
   }
   
+  if (p === '/api/test-trade' && method === 'POST') {
+    // ONE-CONTRACT PROOF TRADE (operator-approved 2026-11-06): prove the live
+    // order path end-to-end on real money. Rides the SAME road as lane entries
+    // (LO.openEntry -> placeOrderV2), skipping ONLY the edge/fair gate. Every
+    // other law stands: 30-day hold rule, anti-stack, cluster cap, price band,
+    // cash-trust, $0.50 hard cap - and qty is pinned to exactly 1 contract.
+    // Body: { ticker, side?: 'YES'|'NO' (default NO), taker?: bool (default
+    // true - pay the ask, IOC, so the proof is a FILL not a rest),
+    // test: true (required confirmation flag) }.
+    const b = await readBody(req);
+    if (b.test !== true) return json(res, { error: 'refused: body must include test:true (this places a REAL order)' }, 400);
+    const ticker = String(b.ticker || '').trim();
+    const side = b.side === 'YES' ? 'YES' : 'NO';
+    const taker = b.taker !== false;
+    if (!ticker) return json(res, { error: 'ticker required' }, 400);
+    const q = await quoteForTicker(ticker);
+    if (!q) return json(res, { error: 'market not found: ' + ticker }, 404);
+    if (q.result === 'yes' || q.result === 'no' || ['finalized', 'settled', 'closed'].includes(q.status)) {
+      return json(res, { error: 'market not tradable (status ' + q.status + ', result ' + q.result + ')' }, 400);
+    }
+    const bid = side === 'YES' ? q.yes_bid : q.no_bid;
+    const ask = side === 'YES' ? q.yes_ask : q.no_ask;
+    if (!(bid > 0) || !(ask > 0)) {
+      return json(res, { error: 'market not two-sided (bid ' + bid + ', ask ' + ask + ')' }, 400);
+    }
+    const price = taker ? ask : bid;
+    if (!(price >= 0.01 && price <= 0.50)) {
+      return json(res, { error: 'price $' + price.toFixed(2) + ' outside test band $0.01-$0.50 (side ' + side + ')' }, 400);
+    }
+    const lane = { name: 'test_flag', horizon: 'test', spot: null };
+    const rec = await LO.openEntry(lane, q, side, price, 0.5, null, 0, { maxQty: 1, taker });
+    if (!rec) {
+      const ls = laneState('test_flag');
+      return json(res, { error: 'openEntry refused: ' + (ls.last_skip || 'unknown') }, 400);
+    }
+    return json(res, { ok: true, test: true, order_id: rec.order_id, ticker: rec.ticker, side: rec.side, price: rec.price, qty: rec.qty, taker, lane: rec.lane, status: rec.status });
+  }
+
   if (p === '/api/no-lanes/exit' && method === 'POST') {
     // Close an ALL NO MARKETS position
     const b = await readBody(req);
