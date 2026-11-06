@@ -32,6 +32,7 @@ const WebSocket = require('ws');
 
 const sqlite3 = require('sqlite3').verbose();
 const kalshi = require('./kalshi');
+const holdRule = require('./hold_rule');
 const kilo = require('./kilo');
 const brain = require('./brain_live');
 const perp = require('./perp_feed');
@@ -1705,6 +1706,20 @@ async function markLivePositions() {
       const heldMs = Date.now() - new Date(pos.opened).getTime();
       if (heldMs < Number(state.runtime.min_hold_sec || 45) * 1000) continue;
 
+      // HOLD RULE (operator order 2026-11-06): a position open 30 days is
+      // force-exited. Sell only at or above entry; otherwise hold and retry on
+      // the next tick. Manual closes and stop-losses are separate and do not
+      // satisfy the rule.
+      if (holdRule.forcedExitDue(pos.opened, Date.now())) {
+        if (holdRule.forcedExitPriceOk(bid, pos.entry_price)) {
+          log('hold_rule_forced_exit', { strategy: pos.strategy, market: pos.market_id, bid, entry: pos.entry_price, opened: pos.opened });
+          LO.exitPosition(pos, bid, 'hold_rule_30d').catch((e) => log('hold_rule_exit_error', { market: pos.market_id, error: String(e.message || e).slice(0, 240) }));
+        } else {
+          pos.hold_rule_waiting = { since: pos.hold_rule_waiting ? pos.hold_rule_waiting.since : new Date().toISOString(), bid, entry: pos.entry_price };
+        }
+        continue;
+      }
+
       // (No high-water tracking: the trail stop it fed is exterminated.)
 
       // Time-decay exit at 80% of contract lifetime - LOSERS ONLY.
@@ -1949,7 +1964,7 @@ async function modePayload(book) {
   } else {
     live = await liveAccountPayload();
   }
-  const b = book || 'dry';
+  const b = book || state.mode || 'dry';
   return {
     mode: b,
     dry: null,
@@ -2398,6 +2413,14 @@ function createAllNoEntry(market_id, entry_price, quantity, fair_at_entry, edge,
   const mode = state.mode;
   const book = state.all_no[mode];
   if (!book) return { error: 'Book not found for mode: ' + mode };
+
+  // HOLD RULE (operator order 2026-11-06): a trade must close within 30 days
+  // of opening. Fail-closed: missing/invalid close_time blocks the entry.
+  // (The live all_no book is paper-tracked - real orders route via
+  // live_engine, which enforces the same gate - but this booking site is
+  // shared by the scanner and the dashboard POST, so the law lives here too.)
+  const holdOk = holdRule.entryAllowed(expiration, Date.now());
+  if (!holdOk.ok) return { error: 'hold rule: ' + holdOk.reason };
 
   // LIFETIME CAP (CODE LAW 2026-11-04): the 1,136-entry strike massacre was
   // one market re-entered endlessly. Three entries per market, lifetime.
@@ -3902,10 +3925,31 @@ async function runAllNoExits() {
   if (!noLs || !noLs.running) return;
   const book = state.all_no[state.mode];
   if (!book) return;
-  
+
+  // HOLD RULE (operator order 2026-11-06): no position may sit open past 30
+  // days. Runs BEFORE the live-mode early return so the paper-tracked live
+  // all_no book obeys the same law as the dry book (a close here is pure
+  // bookkeeping; real money exits live in markLivePositions/live_engine).
   for (const pos of book.positions) {
     if (pos.status !== 'resting') continue;
-    
+    if (!holdRule.forcedExitDue(pos.opened_at, Date.now())) continue;
+    const q = await quoteForTicker(pos.market_id);
+    const mark = pos.side === 'YES' ? (q ? q.yes_bid : null) : (q ? q.no_bid : null);
+    if (mark == null) continue;
+    if (holdRule.forcedExitPriceOk(mark, pos.entry_price)) {
+      log('hold_rule_forced_exit', { strategy: pos.strategy, market: pos.market_id, bid: mark, entry: pos.entry_price, opened: pos.opened_at });
+      const result = closeAllNoPosition(pos.id, mark, 'hold_rule_30d');
+      if (result.ok) log('all_no_exit', { market_id: pos.market_id, reason: 'hold_rule_30d', pnl: result.pnl });
+    } else {
+      pos.hold_rule_waiting = { since: pos.hold_rule_waiting ? pos.hold_rule_waiting.since : new Date().toISOString(), bid: mark, entry: pos.entry_price };
+    }
+  }
+
+  if (state.mode === 'live') return; // other all_no exits are live-mode disabled (book is paper-tracked)
+
+  for (const pos of book.positions) {
+    if (pos.status !== 'resting') continue;
+
     const q = await quoteForTicker(pos.market_id);
     const mark = pos.side === 'YES' ? (q ? q.yes_bid : null) : (q ? q.no_bid : null);
     if (!q || mark == null) continue;

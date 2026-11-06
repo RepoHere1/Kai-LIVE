@@ -19,6 +19,7 @@
 // is topped up from the primary shard (0) with an intra-account transfer before the order posts.
 
 const crypto = require('crypto');
+const holdRule = require('./hold_rule');
 
 const ENTRY_TTL_MS = 30 * 1000;
 const CANCEL_SETTLE_MS = 15 * 1000;
@@ -472,8 +473,9 @@ function pendingExposure() {
   async function openEntry(lane, q, side, price, fair, edge, sigma, opts) {
     // OPERATOR RULE (2026-11-06): markets are unrestricted; a TRADE must close
     // within 30 days of opening. Entries whose market closes further out are refused.
-    if (q && q.close_time && (new Date(q.close_time).getTime() - Date.now()) > 30 * 24 * 3600 * 1000) {
-      log('trade_hold_refused', { ticker: q.ticker, closes: q.close_time, lane: lane && lane.name });
+    const hold = holdRule.entryAllowed(q && q.close_time, Date.now());
+    if (!hold.ok) {
+      log('trade_hold_refused', { ticker: q && q.ticker, closes: q && q.close_time, lane: lane && lane.name, reason: hold.reason });
       return null;
     }
     // EDGE TRUTH: some callers (deep-value pass) used to pass edge=null, so the
