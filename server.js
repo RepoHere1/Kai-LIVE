@@ -1021,18 +1021,49 @@ const LO = require('./live_engine').create({
   persistPosition: (pos) => persistPosition(pos),
 });
 let saveTimer = null;
+// SAVE-PATH WITNESS (2026-11-06): the save used to swallow every error. A single
+// non-serializable value (circular ref / BigInt) made JSON.stringify throw, every
+// later save returned false silently, and state.json froze while the process kept
+// trading. Serialize defensively and LOG every failure.
+function safeStringify(obj) {
+  const ancestors = [];
+  return JSON.stringify(obj, function (key, value) {
+    if (typeof value === 'bigint') return value.toString();
+    if (typeof value !== 'object' || value === null) return value;
+    while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) ancestors.pop();
+    if (ancestors.includes(value)) return '[circular]';
+    ancestors.push(value);
+    return value;
+  }, 1);
+}
+let stateWriteErrors = 0;
+function noteStateWriteError(stage, err) {
+  stateWriteErrors++;
+  const msg = String((err && err.message) || err).slice(0, 300);
+  try { console.error('[state] write failed at ' + stage + ': ' + msg); } catch (e) { }
+  try { log('state_write_error', { stage, error: msg, count: stateWriteErrors }); } catch (e) { }
+}
 function writeStateAtomic() {
   // ATOMIC REPLACE. Write temp -> fsync -> rename. The old writeFileSync could
   // leave a half-written state.json if the process was killed mid-save, and the
   // next boot then silently reverted to defaults.
   let payload = null;
-  try { payload = JSON.stringify(state, null, 1); } catch (e) { return false; }
+  try { payload = safeStringify(state); } catch (e) { noteStateWriteError('stringify', e); return false; }
   const tmp = STATE_TMP_FILE + '.' + process.pid;
   try {
     const fd = fs.openSync(tmp, 'w');
     try { fs.writeSync(fd, payload); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    fs.renameSync(tmp, STATE_FILE);
+    try {
+      fs.renameSync(tmp, STATE_FILE);
+    } catch (e) {
+      // Windows can refuse rename while another reader holds state.json open.
+      // Fall back to a direct overwrite so the save still lands (and is logged).
+      noteStateWriteError('rename-fallback', e);
+      fs.writeFileSync(STATE_FILE, payload);
+      try { fs.unlinkSync(tmp); } catch (e3) { }
+    }
   } catch (e) {
+    noteStateWriteError('write', e);
     try { fs.unlinkSync(tmp); } catch (e2) { }
     return false;
   }
@@ -1072,29 +1103,54 @@ const spot = {};      // product -> { price, bid, ask, t, at, source, points:[{t
 const spotAge = {};   // product -> ms timestamp of last success
 const marketCache = new Map(); // series -> { at, market, source, error, markets }
 
-for (const p of SPOT_PRODUCTS) spot[p] = { price: null, points: [], source: 'Coinbase Exchange (api.exchange.coinbase.com)', product: p };
+for (const p of SPOT_PRODUCTS) spot[p] = { price: null, points: [], source: 'Coinbase Exchange (api.exchange.coinbase.com)', product: p, fresh_ticks: 0, stale_frames: 0, duplicate_frames: 0, rejected: 0 };
 
-async function pollSpot() {
-  for (const p of SPOT_PRODUCTS) {
+// SPOT INGEST (2026-11-06). Every spot tick enters through here, from the
+// Coinbase WebSocket or the REST backstop. A frame whose exchange timestamp is
+// old is counted and dropped; so is an exact repeat of the last price+time.
+// Before this, a frozen feed kept advancing `at` while every point carried the
+// same stale timestamp, which emptied the 900s realised-vol window and blinded
+// every lane ("no realized vol", every candidate refused).
+const SPOT_MAX_FRAME_AGE_SEC = 20;
+function ingestSpotTick(product, price, bid, ask, timeStr, via) {
+  const s = spot[product];
+  if (!s) return false;
+  if (!Number.isFinite(price) || price <= 0) { s.rejected++; return false; }
+  const nowSec = Date.now() / 1000;
+  let t = Math.floor(new Date(timeStr).getTime() / 1000);
+  if (!Number.isFinite(t)) t = Math.floor(nowSec);
+  if (nowSec - t > SPOT_MAX_FRAME_AGE_SEC) {
+    s.stale_frames++;
+    s.last_stale = { via, time: timeStr || null, age_s: Math.round(nowSec - t) };
+    return false;
+  }
+  if (timeStr && timeStr === s.last_time_str && price === s.price) { s.duplicate_frames++; return false; }
+  s.price = price;
+  if (Number.isFinite(bid)) s.bid = bid;
+  if (Number.isFinite(ask)) s.ask = ask;
+  s.t = t;
+  s.at = Date.now();
+  s.last_time_str = timeStr || null;
+  s.via = via;
+  s.fresh_ticks++;
+  s.points.push({ t, p: price });
+  const cutoff = nowSec - 86400;
+  while (s.points.length && s.points[0].t < cutoff) s.points.shift();
+  if (s.points.length > 30000) s.points.splice(0, s.points.length - 30000);
+  return true;
+}
+
+async function pollSpot(products) {
+  for (const p of (products || SPOT_PRODUCTS)) {
     try {
       const r = await fetch('https://api.exchange.coinbase.com/products/' + p + '/ticker', {
-        headers: { 'User-Agent': 'kai-mirror/1.0' },
+        headers: { 'User-Agent': 'kai-mirror/1.0', 'Cache-Control': 'no-cache' },
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
-      const price = Number(j.price);
-      if (!Number.isFinite(price)) throw new Error('bad price');
-      const s = spot[p];
-      s.price = price;
-      s.bid = Number(j.bid);
-      s.ask = Number(j.ask);
-      s.t = Math.floor(new Date(j.time).getTime() / 1000) || Math.floor(Date.now() / 1000);
-      s.at = Date.now();
-      s.points.push({ t: s.t, p: price });
-      const cutoff = Date.now() / 1000 - 86400;
-      while (s.points.length && s.points[0].t < cutoff) s.points.shift();
-      if (s.points.length > 30000) s.points.splice(0, s.points.length - 30000);
-      spotAge[p] = Date.now();
+      if (ingestSpotTick(p, Number(j.price), Number(j.bid), Number(j.ask), j.time, 'rest')) {
+        spotAge[p] = Date.now();
+      }
     } catch (e) {
       spot[p].last_error = String(e.message || e);
     }
@@ -2762,7 +2818,7 @@ async function handle(req, res) {
     return;
   }
   if (p === '/api/provenance') {
-    return json(res, { provenance: lastProvenance(), lanes: cards(), spot: Object.fromEntries(SPOT_PRODUCTS.map(x => [x, { price: spot[x].price, at: spot[x].at ? new Date(spot[x].at).toISOString() : null, ticks: spot[x].points.length, vol_per_sec: perSecondVol(x, 900) }])) });
+    return json(res, { provenance: lastProvenance(), lanes: cards(), spot: Object.fromEntries(SPOT_PRODUCTS.map(x => [x, { price: spot[x].price, at: spot[x].at ? new Date(spot[x].at).toISOString() : null, via: spot[x].via || null, last_exchange_time: spot[x].last_time_str || null, ticks: spot[x].points.length, fresh_ticks: spot[x].fresh_ticks, stale_frames: spot[x].stale_frames, duplicate_frames: spot[x].duplicate_frames, last_stale: spot[x].last_stale || null, vol_per_sec: perSecondVol(x, 900) }])), state_write_errors: stateWriteErrors });
   }
   if (p === '/api/config' && method === 'POST') {
     const b = await readBody(req);
@@ -3913,26 +3969,31 @@ async function boot() {
 
   // Coinbase WebSocket for real-time spot prices (replaces 2s HTTP polling)
   const spotProducts = ['BTC-USD', 'ETH-USD', 'XRP-USD', 'HYPE-USD'];
+  let spotWsLastFrame = Date.now();
   const coinbaseWS = new CoinbaseWS(spotProducts,
       (ticker) => {
         // High-frequency feed: NO per-ticker logging (PC strain).
-        const p = spot[ticker.product_id];
-        if (p) {
-          p.price = ticker.price;
-          p.bid = ticker.bid;
-          p.ask = ticker.ask;
-          p.t = Math.floor(new Date(ticker.time).getTime() / 1000) || Math.floor(Date.now() / 1000);
-          p.at = Date.now();
-          p.points.push({ t: p.t, p: ticker.price });
-          const cutoff = Date.now() / 1000 - 86400;
-          while (p.points.length && p.points[0].t < cutoff) p.points.shift();
-          if (p.points.length > 30000) p.points.splice(0, p.points.length - 30000);
-        }
+        spotWsLastFrame = Date.now();
+        ingestSpotTick(ticker.product_id, ticker.price, ticker.bid, ticker.ask, ticker.time, 'ws');
       },
       (err) => { console.error('[CoinbaseWS] Error:', err.message); },
       coinbaseAuth
     );
   coinbaseWS.connect();
+  // SPOT WATCHDOG (2026-11-06): a product with no fresh tick for 15s is
+  // backfilled over REST, and a WebSocket silent for 30s is recycled.
+  setInterval(() => {
+    try {
+      const now = Date.now();
+      const stale = SPOT_PRODUCTS.filter((p) => !spot[p].at || now - spot[p].at > 15000);
+      if (stale.length) { pollSpot(stale).catch(() => {}); }
+      if (now - spotWsLastFrame > 30000 && coinbaseWS.ws && coinbaseWS.ws.readyState === 1) {
+        console.error('[spot-watchdog] WebSocket silent ' + Math.round((now - spotWsLastFrame) / 1000) + 's, recycling');
+        spotWsLastFrame = now;
+        coinbaseWS.ws.close();
+      }
+    } catch (e) { }
+  }, 5000);
 
 
   // REQUEST THROTTLE - protects PC from API overload (initialized after all functions defined)
