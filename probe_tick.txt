@@ -1,0 +1,6 @@
+0.68s get /markets 664ms source dry ms 627
+0.68s get /markets 0ms source dry ms 627
+0.69s get /markets 0ms source dry ms 627
+0.69s get /markets 0ms source dry ms 627
+0.69s get /markets 0ms source dry ms 627
+1.96s resolveFresh btc_updown -> {"at":1793740647663,"series":"KXBTC15M","ticker":"KXBTC15M-26NOV031630-30","close_time":"2026-11-03T21:30:00Z","tau_sec":752,"fresh":true} 1268ms
