@@ -17,6 +17,10 @@ $lastLaneCount = 0   # lane book total closed trades
 $lastBal = $null; $lastPnl = $null; $lastUptime = $null; $lastPulse = 0
 $balKnown = $false   # true only when the server reported a REAL balance
 
+$knownShadow = @{}   # shadow event key -> seen
+$shadowSeeded = $false
+$lastShadowPoll = 0
+
 function J([string]$u) {
   try { return (Invoke-WebRequest -Uri $u -TimeoutSec 15 -UseBasicParsing).Content | ConvertFrom-Json } catch { return $null }
 }
@@ -166,6 +170,29 @@ while ($true) {
     if ($knownRT.Count -gt 400) { $knownRT.Clear(); foreach ($t in @($rt.trades)) { $knownRT["$($t.market_id)|$($t.exit_timestamp)|$($t.entry_price)|$($t.pnl)"] = $true } }
   }
 
+  # SHADOW TRADES ON THE TAPE: every blocked or cold candidate the vaccine
+  # paper-trades is printed when it opens and when it settles. Polled every 15s.
+  $nowShadow = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  if (($nowShadow - $lastShadowPoll) -ge 15) {
+    $lastShadowPoll = $nowShadow
+    $sc = J "http://127.0.0.1:$($Cfg.Port)/api/calibration"
+    if ($sc -and $sc.shadow_events) {
+      foreach ($e in @($sc.shadow_events)) {
+        $sk = "$($e.at)|$($e.kind)|$($e.market_id)|$($e.side)"
+        if ($knownShadow[$sk]) { continue }
+        $knownShadow[$sk] = $true
+        if (-not $shadowSeeded) { continue }
+        if ($e.kind -eq 'SHADOW_OPEN') {
+          Line 'DarkMagenta' ("SHADOW OPEN {0} {1} @{2} claimed={3} adj={4} [{5}]" -f $e.market_id, $e.side, $e.price, $e.claimed, $e.adjusted, $e.strategy)
+        } else {
+          $scol = if ([double]$e.pnl -gt 0) { 'Green' } else { 'Red' }
+          Line $scol ("SHADOW {0} {1} {2} @{3} pnl={4} [{5}]" -f $e.outcome, $e.market_id, $e.side, $e.price, $e.pnl, $e.strategy)
+        }
+      }
+    }
+    if ($sc) { $shadowSeeded = $true }
+  }
+
   $h = if ($snap) { $snap.health } else { $null }
   if ($h -and $null -ne $h.uptime_sec) {
     $up = [int]$h.uptime_sec
@@ -204,7 +231,7 @@ while ($true) {
       $vcol = if ($warm.Count -eq 0) { 'DarkYellow' } elseif ($over.Count -gt $okBk.Count) { 'Red' } else { 'Green' }
       $wtxt = 'no warm buckets (n>=20) yet'
       if ($worst) { $wtxt = ("worst {0}: model {1} real {2} (n={3})" -f $worst.bucket, [Math]::Round([double]$worst.center,2), [Math]::Round([double]$worst.realized,2), $worst.n) }
-      Line $vcol ("VACCINE {0} warm buckets | {1} overstated / {2} ok | {3} | shadows {4}" -f $warm.Count, $over.Count, $okBk.Count, $wtxt, $(if ($null -ne $cal.pending_shadows) { $cal.pending_shadows } else { 0 }))
+      Line $vcol ("VACCINE {0} warm buckets | {1} overstated / {2} ok | {3} | shadows {4}" -f $warm.Count, $over.Count, $okBk.Count, $wtxt, $(if ($null -ne $cal.pending_shadows_n) { $cal.pending_shadows_n } elseif ($null -ne $cal.pending_shadows -and $cal.pending_shadows -isnot [array]) { $cal.pending_shadows } else { 0 }))
     }
     # SHARDS: per-shard cash. Entries die with "shard funding" skips when the
     # target shard (2 = crypto/commodities) runs dry - this makes it visible.
@@ -212,6 +239,22 @@ while ($true) {
     if ($sh -and $sh.shards) {
       $stxt = ($sh.shards | ForEach-Object { "s{0}:`${1}" -f $_.exchange_index, [Math]::Round([double]$_.balance,2) }) -join ' '
       Line 'Cyan' ("SHARDS {0}" -f $stxt)
+    }
+    # BACKTESTER ON THE TAPE: latest settled-market verdict per strategy, plus live
+    # progress while a run is writing its log (backtest.js lives in Kai-Mirror).
+    $btPath = 'C:/Users/darri/Kai-Mirror/backtest_results.json'
+    $bt = $null
+    try { $bt = Get-Content -LiteralPath $btPath -Raw | ConvertFrom-Json } catch { }
+    if ($bt -and $bt.strategies) {
+      $vcount = @($bt.strategies | Group-Object verdict | ForEach-Object { "$($_.Name) $($_.Count)" }) -join ' | '
+      $provenN = @($bt.strategies | Where-Object { $_.verdict -eq 'PROVEN' }).Count
+      $bcol = if ($provenN -gt 0) { 'Green' } else { 'DarkYellow' }
+      Line $bcol ("BACKTEST {0} ({1}d, {2} strategies) | {3}" -f $bt.generated_at, $bt.window.days, @($bt.strategies).Count, $vcount)
+    }
+    $btLog = 'C:/Users/darri/Kai-Mirror/backtest_progress.log'
+    if (Test-Path -LiteralPath $btLog) {
+      $btAge = ((Get-Date) - (Get-Item -LiteralPath $btLog).LastWriteTime).TotalMinutes
+      if ($btAge -lt 10) { Line 'DarkCyan' ("BACKTEST RUNNING: {0}" -f (Get-Content -LiteralPath $btLog -Tail 1)) }
     }
     Line 'DarkCyan' ("PULSE alive | bal `${0} | all_no `${1} (n={2}) | lanes `${3} (n={4}) | TOTAL `${5} | acct `${6} | lanes {7} on | uptime {8}m | boots {9}" -f (BalTxt $lastBal), (BalTxt $lastPnl), ($(if ($nb) { $nb.book.entries } else { '?' })), (BalTxt $lastLanePnl), $lastLaneCount, $totPnl, ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60), $boots)
   }

@@ -164,6 +164,13 @@ function create(deps) {
   // ---------------------------------------------------------------------
   // Shadow ledger: blocked (and cold) candidates paper-traded for free.
   // ---------------------------------------------------------------------
+  // SHADOW EVENTS (2026-11-06): every shadow open and settlement is recorded so
+  // the tape can show shadow trades as they happen (bounded ring, last 200).
+  const shadowEvents = [];
+  function pushShadowEvent(e) {
+    shadowEvents.push(e);
+    if (shadowEvents.length > 200) shadowEvents.splice(0, shadowEvents.length - 200);
+  }
   function shadowOpen(o) {
     try {
       const claimed = Number(o.claimed); const price = Number(o.price);
@@ -189,6 +196,7 @@ function create(deps) {
         spot_at_entry: o.spot != null ? o.spot : null,
       };
       pending.set(dedupeKey, row);
+      pushShadowEvent({ at: row.ts, kind: 'SHADOW_OPEN', market_id: row.market_id, side, strategy: row.strategy, price, claimed, adjusted: g.adjusted });
       if (dbRun) dbRun(`INSERT OR IGNORE INTO calibration
         (ts, market_id, strategy, source, side, asset, horizon, bucket,
          claimed_fair, entry_price, adjusted, outcome, sigma_per_sec, tau_sec, strike, spot_at_entry)
@@ -210,6 +218,7 @@ function create(deps) {
       if (row.market_id !== ticker) continue;
       const outcome = ((row.side === 'YES') === (resultYes === true)) ? 1 : 0;
       pending.delete(dk);
+      pushShadowEvent({ at: new Date().toISOString(), kind: 'SHADOW_SETTLED', market_id: row.market_id, side: row.side, strategy: row.strategy, price: row.entry_price, claimed: row.claimed_fair, outcome: outcome ? 'WIN' : 'LOSS', pnl: outcome ? Number((1 - row.entry_price).toFixed(4)) : Number((-row.entry_price).toFixed(4)) });
       bump(row.bucket, outcome);
       // The price zone learns from shadows too (row.entry_price is the zone).
       const spk = pKey(assetOf(row.market_id), horizonOf(row.market_id, row.strategy), row.side, row.entry_price);
@@ -503,6 +512,7 @@ function create(deps) {
       k_prior: K,
       pending_shadows: Array.from(pending.values()).slice(-5),
       pending_shadows_n: pending.size,
+      shadow_events: shadowEvents.slice(-80),
       init_status: INIT_STATE ? {
         stage: INIT_STATE.at, status: INIT_STATE.status, ms: Date.now() - INIT_STATE.t0,
         hist_available: INIT_STATE.hist, inserted: INIT_STATE.inserted, err: INIT_STATE.err,
