@@ -35,9 +35,18 @@ function refreshAgent() {
 const AGENT_OK = refreshAgent();
 
 const HERE = __dirname;
-function loadEnv(file) {
+// MASTER ENV CHAIN (2026-11-07, new hardware): D:\master.env is the single
+// source of truth for credentials on this PC. Resolution order:
+//   1. an explicitly passed file (tools that ask for one specific .env)
+//   2. D:\master.env (or $KAI_MASTER_ENV) — ALWAYS overrides when present
+//   3. <repo>/.env — fills gaps only (may be absent entirely)
+// Name adapters translate master.env conventions (KALSHI_API_KEY_ID +
+// KALSHI_PRIVATE_KEY_PATH, path-based) onto this codebase's names
+// (KALSHI_LIVE_KEY_ID + KALSHI_LIVE_PRIVATE_KEY, inline PEM).
+const MASTER_ENV_PATH = process.env.KAI_MASTER_ENV || 'D:\\master.env';
+const ENV_SOURCES = {};
+function parseEnvFile(p) {
   const out = {};
-  const p = file || path.join(HERE, '.env');
   let text = '';
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   const lines = text.split(/\r?\n/);
@@ -65,6 +74,37 @@ function loadEnv(file) {
     }
   }
   flush();
+  return out;
+}
+function readPemFile(v, baseDir) {
+  if (!v) return '';
+  const t = String(v).trim().replace(/^["']|["']$/g, '');
+  if (!t) return '';
+  let p = t;
+  try {
+    if (!path.isAbsolute(p)) p = path.join(baseDir || process.cwd(), p);
+    return fs.readFileSync(p, 'utf8').trim();
+  } catch (e) { return ''; }
+}
+function loadEnv(file) {
+  // Repo .env first (gap-fill), then master.env overlays — master wins.
+  const out = parseEnvFile(file || path.join(HERE, '.env'));
+  if (!file) {
+    const master = parseEnvFile(MASTER_ENV_PATH);
+    const masterDir = path.dirname(MASTER_ENV_PATH);
+    for (const k of Object.keys(master)) {
+      if (String(master[k] || '').trim() !== '') {
+        out[k] = master[k];
+        ENV_SOURCES[k] = MASTER_ENV_PATH;
+      }
+    }
+    // ---- adapters: fill gaps only; native names always win ----
+    if (!out.KALSHI_LIVE_KEY_ID && out.KALSHI_API_KEY_ID) out.KALSHI_LIVE_KEY_ID = out.KALSHI_API_KEY_ID;
+    if (!out.KALSHI_LIVE_PRIVATE_KEY && out.KALSHI_PRIVATE_KEY_PATH) out.KALSHI_LIVE_PRIVATE_KEY = readPemFile(out.KALSHI_PRIVATE_KEY_PATH, masterDir);
+    if (!out.KALSHI_DEMO_KEY_ID && out.KALSHI_DEMO_API_KEY_ID) out.KALSHI_DEMO_KEY_ID = out.KALSHI_DEMO_API_KEY_ID;
+    if (!out.KALSHI_DEMO_PRIVATE_KEY && out.KALSHI_DEMO_PRIVATE_KEY_PATH) out.KALSHI_DEMO_PRIVATE_KEY = readPemFile(out.KALSHI_DEMO_PRIVATE_KEY_PATH, masterDir);
+    if (!out.KALSHI_LIVE_BASE && out.KALSHI_BASE_URL) out.KALSHI_LIVE_BASE = out.KALSHI_BASE_URL;
+  }
   return out;
 }
 
@@ -356,4 +396,4 @@ async function markets(series, limit) {
   return get('/markets', { query: { limit: limit || 5, status: 'open', series_ticker: series }, ttlMs: 1500 });
 }
 
-module.exports = { loadEnv, ENV, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards, refreshAgent, agentActive: () => !!kalshiAgent };
+module.exports = { loadEnv, ENV, ENV_SOURCES, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards, refreshAgent, agentActive: () => !!kalshiAgent };
