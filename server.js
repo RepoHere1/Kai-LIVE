@@ -1006,6 +1006,16 @@ state.boot_count = (state.boot_count || 0) + 1;
 const CALIB = calibrationMod.create({ dbRun, dbAll, dbFile: DB_FILE, log: (k, o) => { try { log(k, o); } catch (e) {} } });
 CALIB.init().catch((e) => { console.error('[calibration] boot failed:', e.message); });
 // LIVE order lifecycle against the real Kalshi account (see live_orders.js).
+// ALPHA GATE (2026-11-06): measured-edge permission system. Verdicts come
+// from outcomes only - closed live trades for mid-book lanes, the certainty
+// ledger for the certainty lane, the vaccine backtest as corroboration. No
+// config assertion can unlock a refuted lane. See alpha_gate.js.
+const ALPHA = require('./alpha_gate').create({
+  getTrades: () => (state.live && state.live.closed) || [],
+  certaintyStats: () => { try { return FACTS.certaintyStats(); } catch (e) { return null; } },
+  vaccine: () => { try { return (CALIB.snapshot() || {}).vaccine_gate || null; } catch (e) { return null; } },
+  log: (k, o) => { try { log(k, o); } catch (e) {} },
+});
 const LIVE_STREAM = new (require('./kalshi_stream').AccountStream)({
   log: (kind, obj) => log(kind, obj),
   onEvent: (ev) => LO.onStream(ev),
@@ -1020,6 +1030,17 @@ const LO = require('./live_engine').create({
   laneState: (name) => laneState(name),
   bookExit: (pos, qty, avg, fee, reason) => bookLiveExit(pos, qty, avg, fee, reason),
   persistPosition: (pos) => persistPosition(pos),
+  // ALPHA + FEED gates (2026-11-06): see alpha_gate.js and the comments in
+  // openEntry. spotAgeMs handles both ms and second timestamps defensively.
+  alphaGate: (name) => ALPHA.verdict(name),
+  spotAgeMs: (asset) => {
+    const s = spot[asset];
+    if (!s) return null;
+    const ms = (x) => { const n = Number(x) || 0; if (n > 1e12) return n; if (n > 1e9) return n * 1000; return 0; };
+    const lastPoint = (s.points && s.points.length) ? s.points[s.points.length - 1] : null;
+    const last = Math.max(ms(s.at), lastPoint ? ms(lastPoint.t) : 0);
+    return last > 0 ? Date.now() - last : null;
+  },
 });
 let saveTimer = null;
 // SAVE-PATH WITNESS (2026-11-06): the save used to swallow every error. A single
@@ -2826,6 +2847,9 @@ async function handle(req, res) {
       // knows (anchor source/age + applied money events), and when the next
       // REST validation may fire. All memory - zero network.
       cash_ledger: LO.cashReport ? LO.cashReport() : null,
+      // ALPHA GATE verdicts (2026-11-06): what may trade real money, and why.
+      // All memory, zero network, zero awaits - health stays fast.
+      alpha: (() => { try { return ALPHA.report(); } catch (e) { return { error: String(e.message || e) }; } })(),
     });
   }
 
@@ -2906,6 +2930,10 @@ if (p === '/api/calibration') {
    const r = await LO.syncNow();
    return json(res, { ok: !!(r && r.cash != null), report: LO.cashReport ? LO.cashReport() : null, cash: r ? r.cash : null });
  };
+ if (p === '/api/alpha') {
+   // Measured-edge verdicts (2026-11-06): what may trade real money, and why.
+   return json(res, ALPHA.report());
+ }
   if (p === '/api/ops/seed-cash' && method === 'POST') {
     // OPERATOR OVERRIDE: allow the engine to size orders using a known-good
     // cash figure when the LIVE key is rate-throttled or fetch-layer rot
@@ -3761,12 +3789,6 @@ async function runCertaintyPass() {
   ls.last_tick = ls.heartbeat;
   if (state.safe_mode) { ls.skips++; ls.last_skip = 'safe mode: fail closed'; return; }
   if (cfg.enabled !== true) { ls.skips++; ls.last_skip = 'lane disabled in config'; return; }
-  const uc = LO.usableCash ? LO.usableCash() : null;
-  if (!uc || !(uc.cash > 0)) {
-    ls.skips++;
-    ls.last_skip = 'no usable cash' + (LO.cashError && LO.cashError() ? ': ' + LO.cashError() : '');
-    return;
-  }
   const open = state.live.positions.filter(p => p.strategy === 'certainty' && p.qty > 0);
   const pending = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'certainty');
   if (open.length + pending.length >= cfg.max_concurrent) { ls.skips++; ls.last_skip = 'max concurrent positions'; return; }
@@ -3776,9 +3798,20 @@ async function runCertaintyPass() {
   ls.last_scan = { at: scan.at, scanned: scan.scanned, candidates: scan.candidates.length };
   const tradable = scan.candidates.filter(c => c.ok);
   // LEDGER: record what we SAW, traded or not. A refused candidate that would
-  // have won is as informative as one we took.
+  // have won is as informative as one we took. THE CASH GATE SITS BELOW THIS
+  // LOOP ON PURPOSE (moved 2026-11-07): during the Kalshi balance-429 storm
+  // the lane still accumulates the settled evidence that the alpha gate
+  // grades it on. Evidence collection must never depend on the exchange.
   for (const c of scan.candidates.slice(0, 20)) {
     try { FACTS.certaintyRecord({ ticker: c.ticker, side: c.side, prob: c.prob, price: c.price, fee: c.fee, margin: c.margin, tau: c.tau, z: c.z, asset: c.asset, traded: c.ok ? 1 : 0, reason: c.reason }); } catch (e) { }
+  }
+  // CASH TRUST (fail-closed law): unanchored ledger = no orders. The
+  // candidates above were still recorded and will settle into proof.
+  const uc = LO.usableCash ? LO.usableCash() : null;
+  if (!uc || !(uc.cash > 0)) {
+    ls.skips++;
+    ls.last_skip = 'no usable cash' + (LO.cashError && LO.cashError() ? ': ' + LO.cashError() : '') + ' (' + scan.candidates.length + ' candidates recorded)';
+    return;
   }
   if (!tradable.length) {
     ls.skips++;

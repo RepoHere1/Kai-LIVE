@@ -34,7 +34,7 @@ const isoNow = () => new Date().toISOString();
 const isCancelled = (s) => /cancel/i.test(String(s || ''));
 
 function create(deps) {
-  const { getState, kalshi, stream, log, save, broadcast, laneState, bookExit, persistPosition } = deps;
+  const { getState, kalshi, stream, log, save, broadcast, laneState, bookExit, persistPosition, alphaGate, spotAgeMs } = deps;
   const st = () => getState();
   const orders = () => {
     const s = st();
@@ -603,6 +603,31 @@ function pendingExposure() {
     if (edge == null && fair != null) edge = Number((fair - Number(price)).toFixed(4));
     const s = st();
     const ls = laneState(lane.name);
+    // ALPHA GATE (2026-11-06): the right to trade real money is earned from
+    // measured outcomes, not asserted by config. Refuted lanes are blocked;
+    // unproven lanes are clamped to 1 contract until their record earns more.
+    if (alphaGate) {
+      const av = alphaGate(lane && lane.name);
+      if (av && av.allowed === false) {
+        ls.skips++; ls.last_skip = 'alpha gate: ' + av.verdict + ' - ' + av.reason;
+        log('alpha_gate_refused', { lane: lane.name, ticker: q.ticker, verdict: av.verdict, reason: av.reason });
+        return null;
+      }
+      if (av && av.max_qty != null) {
+        opts = Object.assign({}, opts, { maxQty: Math.min((opts && opts.maxQty) || av.max_qty, av.max_qty) });
+      }
+    }
+    // FEED GATE (2026-11-06): a stale spot feed turns every fair value into
+    // fiction - the certainty thesis specifically (settlement is priced from
+    // live ticks). No fresh tick, no trade.
+    if (spotAgeMs && lane && lane.spot) {
+      const age = spotAgeMs(lane.spot);
+      if (age != null && age > 3000) {
+        ls.skips++; ls.last_skip = 'spot feed stale ' + Math.round(age / 1000) + 's (' + lane.spot + ')';
+        log('spot_stale_refused', { lane: lane.name, ticker: q.ticker, asset: lane.spot, age_ms: age });
+        return null;
+      }
+    }
     if (pendingEntries().some((o) => o.lane === lane.name && o.ticker === q.ticker)) {
       ls.skips++; ls.last_skip = 'entry already resting for this lane';
       return null;
