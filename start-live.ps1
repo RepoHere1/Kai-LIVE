@@ -1,7 +1,8 @@
-# Kai-LIVE Server - Persistent Background Launcher
-$serverPath = "C:\Users\darri\Kai-LIVE\server.js"
-$outLog = "C:\Users\darri\Kai-LIVE\server-out.log"
-$errLog = "C:\Users\darri\Kai-LIVE\server-err.log"
+# Kai-LIVE Server - Persistent Background Launcher (portable: repo = script dir)
+$repo = $PSScriptRoot
+$serverPath = Join-Path $repo 'server.js'
+$outLog = Join-Path $repo 'server-out.log'
+$errLog = Join-Path $repo 'server-err.log'
 $port = 8788
 
 # Kill any existing node on this port
@@ -15,12 +16,12 @@ if ($existing) {
 }
 
 # Start server with redirected I/O (use separate files for stdout/stderr)
-$process = Start-Process node -ArgumentList "`"$serverPath`"" -WorkingDirectory "C:\Users\darri\Kai-LIVE" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
+$process = Start-Process node -ArgumentList "`"$serverPath`"" -WorkingDirectory $repo -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
 
 Write-Host "Kai-LIVE started (PID: $($process.Id)) on port $port"
 Write-Host "Stdout: $outLog"
 Write-Host "Stderr: $errLog"
-$process.Id | Out-File "C:\Users\darri\Kai-LIVE\server.pid" -Encoding ascii
+$process.Id | Out-File (Join-Path $repo 'server.pid') -Encoding ascii
 
 # Verify it's up
 Start-Sleep 3
