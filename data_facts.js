@@ -42,6 +42,9 @@ const MAX_SPREAD = 0.12;
 const SKEW_MAX = 0.04;
 const LEDGER_MAX_ROWS = 200000;
 const LEDGER_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+// CERT RETENTION (§4 step 1): the certainty ledger outlives the tick cache.
+const CERT_SETTLED_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const CERT_MAX_ROWS = 50000;
 
 function n(v) { const x = Number(v); return Number.isFinite(x) ? x : null; }
 
@@ -162,11 +165,18 @@ function create(deps) {
   if (db) {
     const t = setInterval(() => { flush(); flushCert(); }, 2000);
     if (t.unref) t.unref();
+    // 2026-11-07 (handoff §4 step 1 - THE 6H AMNESIA FIX): the cert table is the
+    // certainty VERDICT LEDGER, not a tick cache. The old blanket 6h age-prune
+    // wiped settled evidence while settlements stalled behind the Kalshi REST
+    // outage, so the lane could never reach the 15-settled graduation bar.
+    // New policy: settled rows live 90 days; pending rows are never age-deleted
+    // (settlement may arrive late); everything bounded by a 50k row cap.
     const prune = setInterval(() => {
       try {
         db.run('DELETE FROM facts WHERE ts < ?', [Date.now() - LEDGER_MAX_AGE_MS], () => {});
         db.run('DELETE FROM facts WHERE id < (SELECT MAX(id) - ? FROM facts)', [LEDGER_MAX_ROWS], () => {});
-        db.run('DELETE FROM cert WHERE ts < ?', [Date.now() - LEDGER_MAX_AGE_MS], () => {});
+        db.run('DELETE FROM cert WHERE settled=1 AND ts < ?', [Date.now() - CERT_SETTLED_MAX_AGE_MS], () => {});
+        db.run('DELETE FROM cert WHERE id < (SELECT MAX(id) - ? FROM cert)', [CERT_MAX_ROWS], () => {});
       } catch (e) { }
     }, 300000);
     if (prune.unref) prune.unref();
@@ -205,8 +215,6 @@ function create(deps) {
       last_good_ms_ago: counters.lastGood ? Date.now() - counters.lastGood : null,
       rules: { MAX_AGE_MS, MAX_REST_AGE_MS, MIN_SPREAD, MAX_SPREAD, SKEW_MAX },
       ledger: dbPath,
-      live_tickers: (deps.liveCount ? deps.liveCount() : null),
-      live_tickers: (deps.liveCount ? deps.liveCount() : null),
       live_tickers: (deps.liveCount ? deps.liveCount() : null),
     };
   }

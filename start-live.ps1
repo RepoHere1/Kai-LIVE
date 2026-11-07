@@ -16,7 +16,9 @@ if ($existing) {
 }
 
 # Start server with redirected I/O (use separate files for stdout/stderr)
-$process = Start-Process node -ArgumentList "`"$serverPath`"" -WorkingDirectory $repo -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
+# 2026-11-07: --max-old-space-size=4096 after LIVE OOMed at the 2GB default cap
+# (heap-out-of-memory native crash ~51min after boot during the Kalshi REST outage).
+$process = Start-Process node -ArgumentList '--max-old-space-size=4096',"`"$serverPath`"" -WorkingDirectory $repo -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
 
 Write-Host "Kai-LIVE started (PID: $($process.Id)) on port $port"
 Write-Host "Stdout: $outLog"
