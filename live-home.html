@@ -761,6 +761,30 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
            </span>
          </div>
       </div>
+      <div class="card hot" id="card-certainty" onclick="openStrategy('certainty')">
+         <div class="ctop">
+           <div>
+             <div class="clabel">Certainty Lane (WS verdict)</div>
+             <div class="mono cname">certainty</div>
+           </div>
+           <span class="pill ok" id="pill-certainty"><span class="dot pulse"></span>running</span>
+         </div>
+         <div class="cproof mono" id="hb-certainty">proof: cycle -</div>
+         <div class="cchart"><canvas id="spark-certainty" height="104"></canvas></div>
+         <div class="cstats">
+           <div><b id="c-certainty-trades">0</b><span>trades</span></div>
+           <div><b id="c-certainty-pnl" class="flat">$0.00</b><span>realized</span></div>
+           <div><b id="c-certainty-win">0.0%</b><span>win rate</span></div>
+           <div><b id="c-certainty-open">0</b><span>open</span></div>
+         </div>
+          <div class="cfoot">
+            <span class="mono" style="color:var(--faint)">BUY AMT <span id="c-certainty-dep">$0.00</span></span>
+            <span class="bar" onclick="event.stopPropagation()">
+              <button id="btn-certainty" onclick="toggleStrategy('certainty')">Stop</button>
+              <button onclick="showAnalysis('certainty')">ANALYSIS OF</button>
+            </span>
+          </div>
+      </div>
     </div>
     <p style="color:var(--faint);font-size:11.5px;margin-top:10px">
       Curves are rebuilt from <code>trade_logs</code>, so a strategy keeps its history across restarts and deploys.

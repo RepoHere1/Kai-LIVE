@@ -563,7 +563,7 @@ function pendingExposure() {
         bid_at_entry: rec.meta.bid_at_entry,
         ask_at_entry: rec.meta.ask_at_entry,
         entry_price: Number(entry.toFixed(4)),
-        stop_loss: rec.lane === 'certainty' ? null : Number((entry * (1 - s.runtime.stop_loss)).toFixed(3)),
+        stop_loss: null, // OPERATOR LAW 2026-11-07 (OPERATOR_LAWS.md): fee-attached exits are FORBIDDEN. Vestigial field stays null on every lane.
         // TAKE PROFIT IS DEAD (operator order, 2026-11-03): no take_profit on
         // any position. A winner rides to settlement - no exit fee, full
         // $1.00 payout. The certainty lane has no stop either: one contract,
@@ -786,6 +786,10 @@ function pendingExposure() {
 
   // ---- exits ---------------------------------------------------------------------------------
   async function exitPosition(pos, bid, reason) {
+    // OPERATOR LAW 2026-11-07 (OPERATOR_LAWS.md): the ONLY real-money exit
+    // chokepoint. Any fee-attached exit reason (stop_loss / take_profit /
+    // trail_stop or anything like them) throws HERE, no matter who calls.
+    if (global.OPERATOR_LAW) global.OPERATOR_LAW.assertNoFeeExit(reason);
     if (pos.exit_inflight || !(pos.qty > 0)) return null;
     if (pos.exit_next_at && Date.now() < pos.exit_next_at) return null;
     if (bid == null || !(bid > 0 && bid < 1)) return null;

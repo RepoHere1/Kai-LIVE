@@ -242,6 +242,18 @@ while ($true) {
       $stxt = ($sh.shards | ForEach-Object { "s{0}:`${1}" -f $_.exchange_index, [Math]::Round([double]$_.balance,2) }) -join ' '
       Line 'Cyan' ("SHARDS {0}" -f $stxt)
     }
+    # SUPER-DETECTIVE (operator commission 2026-11-07): factual-edge mining
+    # across Kalshi/Polymarket/Manifold + our own settled trades. Yellow = a
+    # walk-forward-confirmed edge is on the table right now.
+    $dtv = J "http://127.0.0.1:$($Cfg.Port)/api/detective"
+    if ($dtv -and $dtv.discovered) {
+      $dtop = @($dtv.discovered)[0]
+      $srcOk = 0
+      if ($dtv.sources) { foreach ($sp in $dtv.sources.PSObject.Properties) { if ($sp.Value.ok) { $srcOk++ } } }
+      $dcol = if ($dtop -and [double]$dtop.edge_per_contract -gt 0) { 'Yellow' } else { 'DarkCyan' }
+      Line $dcol ("DETECTIVE {0} edges | {1} | sources ok {2}/4" -f @($dtv.discovered).Count, $(if ($dtop) { "{0} {1} edge={2}/ct n={3}" -f $dtop.source, $dtop.rule, $dtop.edge_per_contract, $dtop.n_test } else { 'no confirmed edge yet (mining)' }), $srcOk)
+    }
+
     # BACKTESTER ON THE TAPE: latest settled-market verdict per strategy, plus live
     # progress while a run is writing its log (backtest.js lives in Kai-Mirror).
     # Portable sibling-repo path (was hardcoded C:\Users\darri\... from the old box).
