@@ -26,3 +26,30 @@ _tape_snap/
 
 detective_results.json
 detective_rows.jsonl
+
+# ---- 2026-11-07 hygiene law: session debris never gets committed ----
+# Operator handoff snapshots live on disk only (untracked 2026-11-07).
+handoff/
+# One-off repair scripts, probe droppings and AI-session output files.
+fix_*.py
+*_probe*.txt
+probe_*.txt
+probe_*.js
+bal_*.txt
+bal_*.js
+tick_*.txt
+kai_pick_*.txt
+kai_pick_*.js
+kai_sniper*.js
+kai_sniper*.txt
+fp2_*.txt
+cand_*.json
+cf_*.json
+quant_*.json
+quant_*_out.txt
+quant_val_*.txt
+snap*.json
+snapshot*.json
+*.bak
+_role_*.txt
+_role_*.json

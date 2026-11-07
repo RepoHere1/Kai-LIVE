@@ -1,8 +1,0 @@
-[1] sampling spot (20 pts x 2s) ...
-    BTC-USD pts=20 vol/s=2.430e-5
-    ETH-USD pts=20 vol/s=2.774e-5
-    XRP-USD pts=20 vol/s=1.503e-4
-    HYPE-USD pts=20 vol/s=1.752e-4
-[2] scanning near-expiry markets ...
-[3] candidates: 0 total, 0 pass
-NO PASSING CANDIDATE — no trade forced (fail closed).

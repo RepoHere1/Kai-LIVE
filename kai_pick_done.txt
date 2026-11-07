@@ -1,4 +1,0 @@
-{
-  "ok": false,
-  "reason": "deadline, no passing candidate in 55m"
-}
