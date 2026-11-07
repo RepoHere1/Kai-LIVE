@@ -197,6 +197,9 @@ function create(deps) {
       };
       pending.set(dedupeKey, row);
       pushShadowEvent({ at: row.ts, kind: 'SHADOW_OPEN', market_id: row.market_id, side, strategy: row.strategy, price, claimed, adjusted: g.adjusted });
+      // TAPE (2026-11-07): shadows are real evidence - the operator sees every
+      // free paper booking on the tape, not just a counter on the pulse line.
+      log('shadow_open', { market_id: row.market_id, side, strategy: row.strategy, price, claimed, adjusted: g.adjusted, asset, horizon, tau: row.tau_sec, strike: row.strike });
       if (dbRun) dbRun(`INSERT OR IGNORE INTO calibration
         (ts, market_id, strategy, source, side, asset, horizon, bucket,
          claimed_fair, entry_price, adjusted, outcome, sigma_per_sec, tau_sec, strike, spot_at_entry)
@@ -219,6 +222,9 @@ function create(deps) {
       const outcome = ((row.side === 'YES') === (resultYes === true)) ? 1 : 0;
       pending.delete(dk);
       pushShadowEvent({ at: new Date().toISOString(), kind: 'SHADOW_SETTLED', market_id: row.market_id, side: row.side, strategy: row.strategy, price: row.entry_price, claimed: row.claimed_fair, outcome: outcome ? 'WIN' : 'LOSS', pnl: outcome ? Number((1 - row.entry_price).toFixed(4)) : Number((-row.entry_price).toFixed(4)) });
+      // TAPE (2026-11-07): a settled shadow is a free data point - it belongs
+      // on the tape next to the real fills it is calibrating.
+      log('shadow_settled', { market_id: row.market_id, side: row.side, strategy: row.strategy, price: row.entry_price, claimed: row.claimed_fair, outcome: outcome ? 'WIN' : 'LOSS', pnl: outcome ? Number((1 - row.entry_price).toFixed(4)) : Number((-row.entry_price).toFixed(4)) });
       bump(row.bucket, outcome);
       // The price zone learns from shadows too (row.entry_price is the zone).
       const spk = pKey(assetOf(row.market_id), horizonOf(row.market_id, row.strategy), row.side, row.entry_price);

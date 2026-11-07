@@ -3709,23 +3709,55 @@ function certaintyCfg() {
   return cfg;
 }
 
+// Scanner plumbing (2026-11-07): budget-bounded awaits and a capped pool. A
+// hanging REST call must never stall a scan cycle - it resolves null and the
+// caller records a refusal instead of waiting Kalshi out.
+function withBudget(promise, ms) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((resolve) => { const t = setTimeout(() => resolve(null), ms); if (t.unref) t.unref(); }),
+  ]);
+}
+async function scanPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 // Read-only scan. This function NEVER places an order - it is also the
 // validator: it shows exactly what the lane would trade, and why.
+// PARALLEL SCANNER (2026-11-07): the thesis lives in the last 20-300s before
+// expiry, and the old scan was SERIAL - one market-list fetch per coin, then
+// one quote REST call per z-survivor, each waiting out Kalshi's degraded
+// network in sequence. Measured: full cycles took >110s - longer than the
+// entire opportunity window - so the lane recorded 0 candidates ever, and the
+// stacked slow awaits surfaced as SERVER SLOW stalls on the pulse tape. Now:
+// (1) the coin series fetch in parallel, 6s budget each; (2) survivor quotes
+// fire in a capped pool (6 wide, 4s budget each), strongest |z| first, at
+// most 8; a lost quote becomes a recorded refusal, never a stall.
 async function scanCertaintyCandidates(cfgIn) {
   const cfg = cfgIn || certaintyCfg();
+  const t0 = Date.now();
   const out = { at: new Date().toISOString(), cfg, candidates: [], seen: [], scanned: 0, notes: [] };
   const coins = (cfg.assets && cfg.assets.length)
     ? BRAIN_COINS.filter(c => cfg.assets.indexOf(c.asset) >= 0)
     : BRAIN_COINS;
-  for (const c of coins) {
+
+  // ---- STAGE 1 (parallel across coins): series lists + CPU pre-filter -----
+  const stage1 = await Promise.all(coins.map(async (c) => {
     const s = spot[c.asset];
-    if (!s || !Number.isFinite(s.price)) { out.notes.push(c.asset + ': no spot'); continue; }
+    if (!s || !Number.isFinite(s.price)) return { note: c.asset + ': no spot' };
     const perSec = perSecondVol(c.asset, 900);
-    if (!perSec) { out.notes.push(c.asset + ': no realised vol'); continue; }
+    if (!perSec) return { note: c.asset + ': no realised vol' };
     let res = null;
-    try { res = await marketsForSeries(c.series, 40); } catch (e) { out.notes.push(c.series + ': fetch failed'); continue; }
+    try { res = await withBudget(marketsForSeries(c.series, 40), 6000); } catch (e) { }
+    if (!res) return { note: c.series + ': fetch failed (6s budget)' };
     const ms = (res && res.markets) || [];
-    if (!ms.length) { out.notes.push(c.series + ': no markets'); continue; }
+    if (!ms.length) return { note: c.series + ': no markets' };
     // Only the two soonest expiry windows can ever qualify.
     const windows = new Map();
     for (const m of ms) {
@@ -3734,15 +3766,17 @@ async function scanCertaintyCandidates(cfgIn) {
       if (!windows.has(ct)) windows.set(ct, []);
       windows.get(ct).push(m);
     }
+    const pre = [], seen = [];
+    let scanned = 0;
     for (const ct of Array.from(windows.keys()).sort().slice(0, 2)) {
       for (const q of windows.get(ct)) {
-        out.scanned++;
+        scanned++;
         // An INITIALIZED market has floor_strike 0 - it is not a strike, it is
-        // "not set yet". Trading against it would be nonsense.
-        if (q.strike == null || !(q.strike > 0)) { out.seen.push({ ticker: q.ticker, why: 'strike not set (market not open yet)' }); continue; }
+        // \"not set yet\". Trading against it would be nonsense.
+        if (q.strike == null || !(q.strike > 0)) { seen.push({ ticker: q.ticker, why: 'strike not set (market not open yet)' }); continue; }
         const tau = (new Date(q.close_time).getTime() - Date.now()) / 1000;
         if (tau < cfg.min_tau_sec - 30 || tau > cfg.max_tau_sec + 60) {
-          out.seen.push({ ticker: q.ticker, tau: Math.round(tau), why: 'outside expiry window' });
+          seen.push({ ticker: q.ticker, tau: Math.round(tau), why: 'outside expiry window' });
           continue;
         }
         // Cheap pre-filter on the STRIKE (strikes never move) using the
@@ -3752,32 +3786,54 @@ async function scanCertaintyCandidates(cfgIn) {
           volMultiplier: cfg.vol_multiplier, basisPct: cfg.basis_pct, points: s.points,
           settleWindowSec: cfg.settle_window_sec,
         });
-        if (cp.pYes == null) { out.seen.push({ ticker: q.ticker, tau: Math.round(tau), why: 'uncomputable' }); continue; }
+        if (cp.pYes == null) { seen.push({ ticker: q.ticker, tau: Math.round(tau), why: 'uncomputable' }); continue; }
         if (Math.abs(cp.z) < cfg.min_z - 1) {
-          out.seen.push({ ticker: q.ticker, tau: Math.round(tau), strike: q.strike, spot: s.price,
+          seen.push({ ticker: q.ticker, tau: Math.round(tau), strike: q.strike, spot: s.price,
             gapPct: cp.gapPct, z: cp.z, why: 'distance to strike too small (z=' + cp.z + ')' });
           continue;
         }
-        const qq = await quoteForTicker(q.ticker);
-        if (!qq || qq.facts_ok === false) {
-          out.seen.push({ ticker: q.ticker, tau: Math.round(tau), z: cp.z, why: 'facts refused: ' + (qq ? (qq.facts_verdict || 'no quote') : 'no quote') });
-          continue;
-        }
-        const tau2 = (new Date(qq.close_time).getTime() - Date.now()) / 1000;
-        const cands = certainty.buildCandidates({ q: qq, spot: s.price, tau: tau2, perSecVol: perSec, points: s.points }, cfg);
-        const best = certainty.bestCandidate(cands);
-        if (!best) continue;
-        best.asset = c.asset;
-        best.perSecVol = perSec;
-        best.spot = s.price;
-        out.candidates.push(best);
-        out.seen.push({ ticker: best.ticker, tau: Math.round(tau2), strike: qq.strike, spot: s.price,
-          gapPct: best.gapPct, z: best.z, side: best.side, price: best.price, prob: best.prob,
-          fee: best.fee, margin: best.margin, ok: best.ok, why: best.reason });
+        pre.push({ ticker: q.ticker, asset: c.asset, spot: s.price, points: s.points, perSec, tau, z: cp.z });
       }
     }
+    return { note: null, scanned, seen, pre };
+  }));
+
+  const quoted = [];
+  for (const r of stage1) {
+    if (!r || r.note) { if (r) out.notes.push(r.note); continue; }
+    out.scanned += r.scanned;
+    for (const sv of r.seen) out.seen.push(sv);
+    for (const p of r.pre) quoted.push(p);
+  }
+  // ---- STAGE 2 (parallel, capped): fresh quotes for the strongest ------
+  quoted.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+  if (quoted.length > 8) out.notes.push(quoted.length + ' z-survivors, quoting strongest 8');
+  const top = quoted.slice(0, 8);
+  const quotes = await scanPool(top, 6, (item) =>
+    withBudget(quoteForTicker(item.ticker), 4000)
+      .then((qq) => ({ item, qq }))
+      .catch(() => ({ item, qq: null })));
+  for (const entry of quotes) {
+    if (!entry) continue;
+    const item = entry.item, qq = entry.qq;
+    if (!qq || qq.facts_ok === false) {
+      out.seen.push({ ticker: item.ticker, tau: Math.round(item.tau), z: item.z, why: 'quote failed (4s budget)' + (qq && qq.facts_verdict ? ': ' + qq.facts_verdict : '') });
+      continue;
+    }
+    const tau2 = (new Date(qq.close_time).getTime() - Date.now()) / 1000;
+    const cands = certainty.buildCandidates({ q: qq, spot: item.spot, tau: tau2, perSecVol: item.perSec, points: item.points }, cfg);
+    const best = certainty.bestCandidate(cands);
+    if (!best) continue;
+    best.asset = item.asset;
+    best.perSecVol = item.perSec;
+    best.spot = item.spot;
+    out.candidates.push(best);
+    out.seen.push({ ticker: best.ticker, tau: Math.round(tau2), strike: qq.strike, spot: item.spot,
+      gapPct: best.gapPct, z: best.z, side: best.side, price: best.price, prob: best.prob,
+      fee: best.fee, margin: best.margin, ok: best.ok, why: best.reason });
   }
   out.candidates.sort((a, b) => b.margin - a.margin);
+  out.took_ms = Date.now() - t0;
   return out;
 }
 
