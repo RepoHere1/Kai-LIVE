@@ -185,7 +185,9 @@ while ($true) {
         if ($e.kind -eq 'SHADOW_OPEN') {
           Line 'DarkMagenta' ("SHADOW OPEN {0} {1} @{2} claimed={3} adj={4} [{5}]" -f $e.market_id, $e.side, $e.price, $e.claimed, $e.adjusted, $e.strategy)
         } else {
-          $scol = if ([double]$e.pnl -gt 0) { 'Green' } else { 'Red' }
+          # OPERATOR SPEC (2026-11-07): a settled shadow keeps its full text, but
+          # the color IS the verdict - WIN prints bright yellow, LOSS prints white.
+          $scol = if ($e.outcome -eq 'WIN') { 'Yellow' } else { 'White' }
           Line $scol ("SHADOW {0} {1} {2} @{3} pnl={4} [{5}]" -f $e.outcome, $e.market_id, $e.side, $e.price, $e.pnl, $e.strategy)
         }
       }
@@ -242,7 +244,8 @@ while ($true) {
     }
     # BACKTESTER ON THE TAPE: latest settled-market verdict per strategy, plus live
     # progress while a run is writing its log (backtest.js lives in Kai-Mirror).
-    $btPath = 'C:/Users/darri/Kai-Mirror/backtest_results.json'
+    # Portable sibling-repo path (was hardcoded C:\Users\darri\... from the old box).
+    $btPath = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Kai-Mirror') 'backtest_results.json'
     $bt = $null
     try { $bt = Get-Content -LiteralPath $btPath -Raw | ConvertFrom-Json } catch { }
     if ($bt -and $bt.strategies) {
@@ -251,7 +254,7 @@ while ($true) {
       $bcol = if ($provenN -gt 0) { 'Green' } else { 'DarkYellow' }
       Line $bcol ("BACKTEST {0} ({1}d, {2} strategies) | {3}" -f $bt.generated_at, $bt.window.days, @($bt.strategies).Count, $vcount)
     }
-    $btLog = 'C:/Users/darri/Kai-Mirror/backtest_progress.log'
+    $btLog = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Kai-Mirror') 'backtest_progress.log'
     if (Test-Path -LiteralPath $btLog) {
       $btAge = ((Get-Date) - (Get-Item -LiteralPath $btLog).LastWriteTime).TotalMinutes
       if ($btAge -lt 10) { Line 'DarkCyan' ("BACKTEST RUNNING: {0}" -f (Get-Content -LiteralPath $btLog -Tail 1)) }

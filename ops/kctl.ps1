@@ -15,9 +15,13 @@ param(
   [Parameter(Position=0)][ValidateSet('mirror','live')][string]$Srv,
   [Parameter(Position=1)][ValidateSet('start','stop','restart','status')][string]$Act = 'status'
 )
+# 2026-11-07: portable sibling-repo discovery (old box hardcoded C:\Users\darri\...).
+# This script lives in <repo>\ops\, so both Kai repos are children of the
+# script's grandparent directory (e.g. C:\Users\<user>\GitReposMine\).
+$KaiRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $Map = @{
-  mirror = @{ Dir = 'C:\Users\darri\Kai-Mirror';  Port = 8787 }
-  live   = @{ Dir = 'C:\Users\darri\Kai-LIVE';   Port = 8788 }
+  mirror = @{ Dir = Join-Path $KaiRoot 'Kai-Mirror'; Port = 8787 }
+  live   = @{ Dir = Join-Path $KaiRoot 'Kai-LIVE';  Port = 8788 }
 }
 $C = $Map[$Srv]
 $PidFile = Join-Path $C.Dir 'kai.pid'
@@ -27,7 +31,7 @@ $ServerJs = Join-Path $C.Dir 'server.js'
 # Mirror fits in 256 (settles ~290MB commit). The watchdog restarts BOTH books
 # through THIS file, so a single hardcoded cap rearms LIVE's OOM bomb on every
 # watchdog restart.
-$HeapCap = if ($Srv -eq 'live') { 640 } else { 256 } # LIVE 448->640 (2026-11-05: OOM at 448 in 18min during flap waves; 640 fits 3.0GB commit headroom)
+$HeapCap = 4096  # 2026-11-07: match start-*.ps1 launchers (LIVE OOMed at the 2GB default cap; the old per-box 640/256 measurements would re-arm the OOM bomb on this hardware)
 $Node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) { $Node = 'C:\Program Files\nodejs\node.exe' }
 

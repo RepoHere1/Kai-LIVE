@@ -1,7 +1,7 @@
 // $1 SUPERBRAIN LIVE PICK — standalone, bypasses the wedged engine pool.
 // Same pessimistic math as the certainty lane (certainty.js, 1.8x vol, basis
 // haircut, empirical tail). One contract, one market, taker, <= $1.00 total.
-process.chdir('C:/Users/darri/Kai-LIVE');
+process.chdir(__dirname);
 const k = require('./kalshi'); k.loadEnv();
 const cert = require('./certainty');
 const crypto = require('crypto');

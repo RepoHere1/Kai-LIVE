@@ -2,7 +2,7 @@
 // PNL PROBE (2026-11-06): read-only anatomy of state.live.closed - the honest
 // answer to "why never a winning trade". No network, no writes.
 const fs = require('fs');
-const st = JSON.parse(fs.readFileSync('C:/Users/darri/Kai-LIVE/state.json', 'utf8'));
+const st = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'state.json'), 'utf8'));
 const T = (st.live && st.live.closed) || [];
 if (!T.length) { console.log('no closed live trades in state.json'); process.exit(0); }
 const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : 0; };

@@ -1,7 +1,7 @@
 // $1 SUPERBRAIN LIVE PICK v2 — LOOPING SNIPER. Scans every ~45s; when a 15m
 // window enters the 20-300s certainty zone with a passing candidate, fires ONE
 // contract (taker, <= $1.00). Writes kai_pick_done.txt with full forensics.
-process.chdir('C:/Users/darri/Kai-LIVE');
+process.chdir(__dirname);
 const fs = require('fs');
 const k = require('./kalshi'); k.loadEnv();
 const cert = require('./certainty');

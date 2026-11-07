@@ -8,7 +8,7 @@
 ## * REPOSITORY STRUCTURE
 
 ```
-C:\Users\darri\Kai-Mirror\          # DRY server (port 8787)
+C:\Users\Device\GitReposMine\Kai-Mirror\          # DRY server (port 8787)
 |-- server.js                       # Main DRY server (~2715 lines)
 |-- brain_dry.js                    # DRY brain (ensemble + 12 signals)
 |-- kalshi.js                       # Kalshi HTTP client
@@ -25,7 +25,7 @@ C:\Users\darri\Kai-Mirror\          # DRY server (port 8787)
 |-- .env                            # Credentials (live/demo keys, Coinbase, Kilo)
 |-- package.json / node_modules
 
-C:\Users\darri\Kai-LIVE\            # LIVE server (port 8788)
+C:\Users\Device\GitReposMine\Kai-LIVE\            # LIVE server (port 8788)
 |-- server.js                       # Main LIVE server (~2700 lines)
 |-- brain_live.js                   # LIVE brain (different weights, 12 signals)
 |-- kalshi.js                       # Kalshi HTTP client
@@ -241,11 +241,11 @@ runtime: {
 
 ```powershell
 # DRY (port 8787)
-cd C:\Users\darri\Kai-Mirror
+cd C:\Users\Device\GitReposMine\Kai-Mirror
 .\kai.ps1 start
 
 # LIVE (port 8788)
-cd C:\Users\darri\Kai-LIVE
+cd C:\Users\Device\GitReposMine\Kai-LIVE
 .\kai-live.ps1 start
 ```
 
