@@ -275,16 +275,25 @@ async function transferBetweenShards(dollars, sourceShard, destShard) {
 
 const cache = new Map();
 const CACHE_MAX_SIZE = 1000; // LRU eviction limit
+const NEG_TTL_MS = 5000;     // fast-fail window for failed keys (outage storm bound)
 const cacheAccessOrder = new Set(); // For LRU tracking
 
 function cached(key, ttlMs, fn) {
-  const hit = cache.get(key);
   const now = Date.now();
-  if (hit && now - hit.at < ttlMs) {
+  const hit = cache.get(key);
+  if (hit && !hit.err && now - hit.at < ttlMs) {
     // Update LRU order
     cacheAccessOrder.delete(key);
     cacheAccessOrder.add(key);
     return Promise.resolve(hit.val);
+  }
+  // NEGATIVE CACHE (2026-11-07 OOM LAW): during an outage every producer poll
+  // used to hit raw() directly (measured 60+ calls/s -> the unbounded throttle
+  // queue pinned ~64MB/min of async contexts -> 4GB heap death). A failed key
+  // now fast-fails for NEG_TTL_MS without touching the network, so any number
+  // of callers self-bound to ~one real attempt per key per window.
+  if (hit && hit.err && now - hit.at < NEG_TTL_MS) {
+    return Promise.reject(hit.err);
   }
   return Promise.resolve(fn()).then(val => {
     // Evict oldest if at capacity
@@ -296,11 +305,24 @@ function cached(key, ttlMs, fn) {
       }
     }
     cache.set(key, { at: now, val });
+    cacheAccessOrder.delete(key);
     cacheAccessOrder.add(key);
     return val;
-  }, err => { 
-    if (hit) return hit.val; 
-    throw err; 
+  }, err => {
+    if (hit && !hit.err) return hit.val; // serve the last GOOD value on error
+    if (hit && hit.err) { hit.at = Date.now(); throw err; } // already negative: refresh window
+    // record a negative entry (same LRU bookkeeping)
+    if (cache.size >= CACHE_MAX_SIZE && !cache.has(key)) {
+      const oldestKey = cacheAccessOrder.values().next().value;
+      if (oldestKey) {
+        cacheAccessOrder.delete(oldestKey);
+        cache.delete(oldestKey);
+      }
+    }
+    cache.set(key, { at: Date.now(), err });
+    cacheAccessOrder.delete(key);
+    cacheAccessOrder.add(key);
+    throw err;
   });
 }
 
