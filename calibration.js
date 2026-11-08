@@ -213,8 +213,13 @@ function create(deps) {
 
   // Settle every pending shadow for a finalized market. resultYes: market
   // resolved YES. Called from the scan sweep for EVERY finalized market,
-  // whether or not we hold a real position in it.
-  function settleResult(ticker, resultYes) {
+  // whether or not we hold a real position in it. source: 'kalshi' (finalize
+  // sweep, default) or 'spot' (SHADOW FAST-SETTLE 2026-11-08: Coinbase-WS
+  // truth at window close - no waiting for Kalshi finalize). Early spot
+  // settles are remembered so Kalshi's later finalize is a live CROSS-CHECK;
+  // a conflict is logged, never silently absorbed.
+  const earlySettled = new Map(); // ticker -> { resultYes, at } (capped 500)
+  function settleResult(ticker, resultYes, source) {
     if (!ticker) return 0;
     let settled = 0;
     for (const [dk, row] of Array.from(pending)) {
@@ -239,7 +244,44 @@ function create(deps) {
       }
       settled++;
     }
+    // SHADOW FAST-SETTLE bookkeeping: remember spot-settled tickers so the
+    // later Kalshi finalize cross-checks us; if it contradicts, that is a
+    // loud log line, not a silent overwrite (honesty about our own oracle).
+    if (settled > 0 && source === 'spot') {
+      earlySettled.set(ticker, { resultYes: resultYes === true, at: Date.now() });
+      if (earlySettled.size > 500) earlySettled.delete(earlySettled.keys().next().value);
+    } else if (settled === 0 && source !== 'spot') {
+      const early = earlySettled.get(ticker);
+      if (early) {
+        if (early.resultYes !== (resultYes === true)) {
+          log('shadow_settle_conflict', { market_id: ticker, spot_result: early.resultYes ? 'yes' : 'no', kalshi_result: resultYes ? 'yes' : 'no', spot_settled_at: new Date(early.at).toISOString() });
+        }
+        earlySettled.delete(ticker);
+      }
+    }
     return settled;
+  }
+
+  // SHADOW 2.0 (2026-11-08): the server's fast-settle pass needs the pending
+  // list, and zombies (markets that closed but never finalize in any scan)
+  // must be swept, not immortalized. outcome=-1 = abandoned sentinel: it is
+  // excluded from every statistic AND from the boot backfill (which selects
+  // outcome IS NULL), so an abandoned row can never resurrect as pending.
+  function pendingRows() { return Array.from(pending.values()); }
+  function abandon(ticker) {
+    if (!ticker) return 0;
+    let dropped = 0;
+    for (const [dk, row] of Array.from(pending)) {
+      if (row.market_id !== ticker) continue;
+      pending.delete(dk);
+      pushShadowEvent({ at: new Date().toISOString(), kind: 'SHADOW_ABANDONED', market_id: row.market_id, side: row.side, strategy: row.strategy, price: row.entry_price });
+      log('shadow_zombie', { market_id: row.market_id, side: row.side, strategy: row.strategy, entry: row.entry_price, why: 'closed but never finalized in any scan pass' });
+      dropped++;
+    }
+    if (dropped && dbRun) {
+      dbRun(`UPDATE calibration SET outcome = -1, pnl = 0 WHERE market_id = ? AND source = 'shadow' AND outcome IS NULL`, [ticker]).catch(() => {});
+    }
+    return dropped;
   }
 
   async function init() {
@@ -532,7 +574,7 @@ function create(deps) {
     };
   }
 
-  return { init, gate, shadowOpen, settleResult, recordOutcome, snapshot };
+  return { init, gate, shadowOpen, settleResult, recordOutcome, snapshot, pendingRows, abandon };
 }
 
 module.exports = { create };

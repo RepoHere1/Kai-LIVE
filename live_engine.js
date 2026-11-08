@@ -603,6 +603,44 @@ function pendingExposure() {
     if (edge == null && fair != null) edge = Number((fair - Number(price)).toFixed(4));
     const s = st();
     const ls = laneState(lane.name);
+    // SHADOW 2.0 (2026-11-08): when a systemic gate refuses an order, the
+    // WOULD-BE order is paper-traded into the calibration ledger and settled
+    // against the real result for free - evidence flows from every refusal.
+    const shadowThis = () => {
+      try {
+        if (!deps.shadowOpen) return;
+        deps.shadowOpen({
+          ticker: q.ticker, strategy: lane && lane.name, side: side || 'NO',
+          claimed: fair, price,
+          sigma: sigma != null ? sigma : null,
+          tau: q.close_time ? Math.max(0, (new Date(q.close_time).getTime() - Date.now()) / 1000) : null,
+          strike: q.strike != null ? q.strike : null,
+          spot: deps.spotPrice ? deps.spotPrice(lane && lane.spot) : null,
+        });
+      } catch (e) { }
+    };
+    // TRADING-HOURS LAW (2026-11-08, detective own-db evidence): hours 21Z
+    // and 23Z are toxic expectancy cells. Blocked-hour entries are refused -
+    // but still SHADOWED, so the law itself stays measurable by the ledger.
+    if (deps.hourBlocked && deps.hourBlocked()) {
+      shadowThis();
+      ls.skips++;
+      ls.last_skip = 'trading-hours law: blocked UTC hour ' + new Date().getUTCHours() + 'Z';
+      log('hour_blocked_refused', { lane: lane.name, ticker: q.ticker, hour: new Date().getUTCHours() });
+      return null;
+    }
+    // TRANSMISSION GATE (operator order 2026-11-08): live order transmission
+    // to Kalshi is OFF. The decision pipeline stays fully warm - every entry
+    // the engine would have transmitted is booked as a SHADOW. The wire stays
+    // cut until the operator flips it via
+    // POST /api/ops/transmission {"enabled":true,"confirm":"TRANSMISSION"}.
+    if (global.__KAI_TRANSMISSION_OFF) {
+      shadowThis();
+      ls.skips++;
+      ls.last_skip = 'transmission OFF (operator): shadowed instead';
+      log('transmission_shadow', { lane: lane.name, ticker: q.ticker, side, price, fair, edge });
+      return null;
+    }
     // ALPHA GATE (2026-11-06): the right to trade real money is earned from
     // measured outcomes, not asserted by config. Refuted lanes are blocked;
     // unproven lanes are clamped to 1 contract until their record earns more.
@@ -790,6 +828,12 @@ function pendingExposure() {
     // chokepoint. Any fee-attached exit reason (stop_loss / take_profit /
     // trail_stop or anything like them) throws HERE, no matter who calls.
     if (global.OPERATOR_LAW) global.OPERATOR_LAW.assertNoFeeExit(reason);
+    // TRANSMISSION GATE (2026-11-08): with the wire cut there are no live
+    // positions to exit (positions only exist after real fills). Defensive.
+    if (global.__KAI_TRANSMISSION_OFF) {
+      log('live_exit_blocked_transmission', { strategy: pos.strategy, market: pos.market_id, reason });
+      return null;
+    }
     if (pos.exit_inflight || !(pos.qty > 0)) return null;
     if (pos.exit_next_at && Date.now() < pos.exit_next_at) return null;
     if (bid == null || !(bid > 0 && bid < 1)) return null;

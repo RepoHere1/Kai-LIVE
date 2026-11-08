@@ -1006,12 +1006,20 @@ function loadState() {
 }
 let state = loadState();
 global.__KAI_TRADE_BLOCKED = !!state.safe_mode;
+// TRANSMISSION GATE (operator order 2026-11-08): live order transmission to
+// Kalshi is OFF until the operator explicitly flips it. Default is FALSE
+// (fail-closed): a missing key never re-arms the wire. Everything else runs
+// perfectly - lanes scan, size, decide; blocked entries become SHADOWS
+// (live_engine openEntry + kalshi.js placeOrderV2 are the chokepoints).
+state.transmission_enabled = state.transmission_enabled === true;
+global.__KAI_TRANSMISSION_OFF = !state.transmission_enabled;
 // The boot note goes straight to crash.log and NEVER through log(): log() touches
 // structures (provLog) that are not initialised yet at this point of module load,
 // and the RECOVERY path must never be able to crash the process it is recovering.
 try {
   fs.appendFileSync(path.join(HERE, 'crash.log'), new Date().toISOString() +
     ' BOOT source=' + STATE_SOURCE + ' safe_mode=' + (state.safe_mode ? 'YES' : 'no') +
+    ' transmission=' + (state.transmission_enabled ? 'ON' : 'OFF') +
     ' error=' + (STATE_LOAD_ERROR || 'none') + '\n');
 } catch (e) { }
 // BOOT COUNTER: every process start bumps this; the tape PULSE prints it so
@@ -1059,6 +1067,11 @@ const LO = require('./live_engine').create({
     const last = Math.max(ms(s.at), lastPoint ? ms(lastPoint.t) : 0);
     return last > 0 ? Date.now() - last : null;
   },
+  // SHADOW 2.0 (2026-11-08): openEntry books would-be orders as shadows when
+  // a systemic gate (transmission off / toxic hour) refuses them.
+  shadowOpen: (o) => { try { return CALIB.shadowOpen(o); } catch (e) { return false; } },
+  spotPrice: (asset) => { const s = spot[asset]; return s && Number.isFinite(s.price) ? s.price : null; },
+  hourBlocked: () => hourBlockedUtc(),
 });
 let saveTimer = null;
 // SAVE-PATH WITNESS (2026-11-06): the save used to swallow every error. A single
@@ -3103,6 +3116,71 @@ if (p === '/api/calibration') {
     return json(res, result, result.error ? 400 : 200);
   }
   
+  // --- transmission gate (operator order 2026-11-08): OFF by default ------
+  // GET  -> status. POST {"enabled":true|false,"confirm":"TRANSMISSION"} -> flip.
+  // While OFF, every would-be live order is booked as a SHADOW instead; the
+  // engine, ledger, WS, settlement and all lanes run perfectly regardless.
+  if (p === '/api/ops/transmission' && method === 'POST') {
+    const b = await readBody(req);
+    if (b.confirm !== 'TRANSMISSION') return json(res, { error: 'refused: body must include confirm:"TRANSMISSION" (this arms/cuts the live order wire)' }, 400);
+    if (typeof b.enabled !== 'boolean') return json(res, { error: 'enabled must be boolean' }, 400);
+    state.transmission_enabled = b.enabled;
+    global.__KAI_TRANSMISSION_OFF = !b.enabled;
+    save();
+    log('control', { action: 'transmission', enabled: b.enabled, via: 'operator api' });
+    return json(res, { ok: true, transmission_enabled: b.enabled, note: b.enabled ? 'LIVE ORDERS WILL NOW TRANSMIT TO KALSHI' : 'orders shadowed, nothing transmits' });
+  }
+  if (p === '/api/ops/transmission') {
+    return json(res, {
+      transmission_enabled: state.transmission_enabled === true,
+      safe_mode: !!state.safe_mode,
+      pending_shadows: (CALIB.snapshot() || {}).pending_shadows_n || 0,
+      note: 'POST {"enabled":bool,"confirm":"TRANSMISSION"} to flip. While off: scans/sizing/shadows/settlement all run; orders do not transmit.',
+    });
+  }
+
+  // --- SHADOW SCOREBOARD: what the free ledger has PROVEN, per cell --------
+  // Settled rows only (outcome 0/1; -1 = abandoned sentinel). Every cell is
+  // measured — no opinions. Cells with n>=20 are evidence-grade; expectancy
+  // in cents per contract. This is the promotion dossier for every lane.
+  if (p === '/api/shadow') {
+    let rows = [];
+    try { rows = await dbAll(`SELECT ts, market_id, strategy, source, side, asset, horizon, entry_price, outcome, pnl FROM calibration WHERE outcome IN (0,1) ORDER BY ts`); }
+    catch (e) { return json(res, { error: 'ledger read failed: ' + String(e.message || e) }, 500); }
+    const mk = () => ({ n: 0, wins: 0, pnl: 0 });
+    const add = (m, k, o, pnl) => { const c = m.get(k) || mk(); c.n++; c.wins += o; c.pnl += pnl; m.set(k, c); };
+    const byStrat = new Map(), byHour = new Map(), byBand = new Map(), bySide = new Map();
+    let tot = mk(), shadowN = 0, liveN = 0;
+    for (const r of rows) {
+      const o = Number(r.outcome), pnl = Number(r.pnl) || 0, px = Number(r.entry_price);
+      if (o !== 0 && o !== 1) continue;
+      if (String(r.source || 'shadow') === 'shadow') shadowN++; else liveN++;
+      add(byStrat, String(r.strategy || '?'), o, pnl);
+      add(byHour, new Date(r.ts).getUTCHours() + 'Z', o, pnl);
+      add(byBand, (Number.isFinite(px) ? (Math.floor(px / 0.05) * 0.05).toFixed(2) : '?') + ' ' + String(r.side || '?'), o, pnl);
+      add(bySide, String(r.side || '?'), o, pnl);
+      tot.n++; tot.wins += o; tot.pnl += pnl;
+    }
+    const rank = (m) => Array.from(m.entries()).map(([name, c]) => ({
+      name, n: c.n, win_rate: Number((c.wins / c.n).toFixed(3)), pnl: Number(c.pnl.toFixed(2)),
+      cents_per_contract: Number((100 * c.pnl / c.n).toFixed(2)),
+    })).sort((a, b) => b.cents_per_contract - a.cents_per_contract);
+    const hours = rank(byHour), strats = rank(byStrat), bands = rank(byBand), sides = rank(bySide);
+    return json(res, {
+      settled_rows: tot.n, shadow_rows: shadowN, live_rows: liveN,
+      total_pnl: Number(tot.pnl.toFixed(2)),
+      total_cents_per_contract: tot.n ? Number((100 * tot.pnl / tot.n).toFixed(2)) : null,
+      hour_utc: hours, by_strategy: strats, by_price_band_side: bands, by_side: sides,
+      evidence_cells_n20: {
+        hours: hours.filter(c => c.n >= 20).length,
+        strategies: strats.filter(c => c.n >= 20).length,
+        bands: bands.filter(c => c.n >= 20).length,
+      },
+      pending_shadows: (CALIB.snapshot() || {}).pending_shadows_n || 0,
+      note: 'cells with n>=20 are evidence-grade; cents_per_contract = expectancy; outcome=-1 (abandoned) excluded',
+    });
+  }
+
   if (p === '/api/test-trade' && method === 'POST') {
     // ONE-CONTRACT PROOF TRADE (operator-approved 2026-11-06): prove the live
     // order path end-to-end on real money. Rides the SAME road as lane entries
@@ -3586,7 +3664,10 @@ async function runAllNoBrainPass() {
   if (!noLs || !noLs.running) return;
   const cashUc = LO.usableCash ? LO.usableCash() : null;
   const cash = cashUc ? cashUc.cash : (LO.cash() || 0);
-  if (!(cash > 0)) return;
+  // CASH vs EVIDENCE (2026-11-08): transmission OFF -> no order posts, so an
+  // unavailable cash figure must not stop the brain pass; entries still reach
+  // openEntry's transmission gate and become shadows.
+  if (!(cash > 0) && !global.__KAI_TRANSMISSION_OFF) return;
   const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
   const pending = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets');
   if (open.length + pending.length >= (cfg.brain_max_concurrent != null ? cfg.brain_max_concurrent : 2)) return;
@@ -3869,8 +3950,11 @@ async function runCertaintyPass() {
   }
   // CASH TRUST (fail-closed law): unanchored ledger = no orders. The
   // candidates above were still recorded and will settle into proof.
+  // CASH vs EVIDENCE (2026-11-08): with transmission OFF no order posts, so
+  // the cash gate must not stop the lane either — entries still reach
+  // openEntry's transmission gate and become shadows.
   const uc = LO.usableCash ? LO.usableCash() : null;
-  if (!uc || !(uc.cash > 0)) {
+  if ((!uc || !(uc.cash > 0)) && !global.__KAI_TRANSMISSION_OFF) {
     ls.skips++;
     ls.last_skip = 'no usable cash' + (LO.cashError && LO.cashError() ? ': ' + LO.cashError() : '') + ' (' + scan.candidates.length + ' candidates recorded)';
     return;
@@ -3962,6 +4046,76 @@ async function runAllNoEngine() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// TRADING-HOURS LAW (2026-11-08) — detective own-db evidence: hours 21Z and
+// 23Z are toxic expectancy cells; 07Z/09Z the positive ones. Entries in
+// blocked hours are refused (and still SHADOWED, so the law itself stays
+// measurable). Config: state.runtime.trading_hours = { blocked_utc: [...] };
+// an empty array disables the law.
+function hourBlockedUtc() {
+  const th = (state.runtime && state.runtime.trading_hours) || {};
+  const arr = Array.isArray(th.blocked_utc) ? th.blocked_utc.map(Number).filter(Number.isFinite) : [21, 23];
+  return arr.includes(new Date().getUTCHours()) ? arr : null;
+}
+
+// ---------------------------------------------------------------------------
+// SHADOW FAST-SETTLE + ZOMBIE SWEEP (2026-11-08 — "make shadow smarter").
+// Old flow: a shadow waited for Kalshi to finalize AND for a later scan pass
+// to see the finalized market — minutes to hours of dead evidence (13 LIVE +
+// ~318 Mirror pendings were sitting in exactly that trap). New flow: the
+// moment a shadow's window closes (entry ts + tau), Coinbase spot truth
+// settles it (close >= strike => YES — the same rule the detective's own_db
+// uses). Kalshi's later finalize becomes a live CROSS-CHECK (conflicts are
+// logged by calibration.settleResult). Zombies (closed, unpriceable, never
+// finalized) are swept at 2h with the outcome=-1 sentinel — never resurrected
+// by the boot backfill (it selects outcome IS NULL).
+const SHADOW_ASSET_PRODUCT = { btc: 'BTC-USD', eth: 'ETH-USD', xrp: 'XRP-USD', hype: 'HYPE-USD' };
+function spotAtClose(product, tsSec) {
+  const s = spot[product];
+  if (!s || !Array.isArray(s.points) || !s.points.length) return null;
+  const pts = s.points;
+  let lo = 0, hi = pts.length - 1, best = null, bestD = Infinity;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const d = Math.abs(pts[mid].t - tsSec);
+    if (d < bestD) { bestD = d; best = pts[mid]; }
+    if (pts[mid].t < tsSec) lo = mid + 1; else hi = mid - 1;
+  }
+  // The close is the LAST print at/just-before settlement; a print 90s+ away
+  // is a feed gap, not the close — refuse instead of guessing.
+  if (!best || bestD > 90) return null;
+  const p = Number(best.p);
+  return Number.isFinite(p) ? p : null;
+}
+function shadowFastSettle() {
+  if (!CALIB || typeof CALIB.pendingRows !== 'function') return;
+  const rows = CALIB.pendingRows();
+  const now = Date.now();
+  for (const row of rows) {
+    const tauSec = Number(row.tau_sec);
+    const ts = Date.parse(row.ts);
+    if (!Number.isFinite(ts) || !Number.isFinite(tauSec)) continue;
+    const closeTs = ts + tauSec * 1000;
+    if (!(closeTs > 0)) continue;
+    if (now < closeTs + 45000) continue;        // let the closing prints land
+    const product = SHADOW_ASSET_PRODUCT[row.asset];
+    if (product && row.strike != null && Number.isFinite(Number(row.strike))) {
+      const sp = spotAtClose(product, Math.floor(closeTs / 1000));
+      if (sp != null) {
+        const resultYes = sp >= Number(row.strike);
+        const n = CALIB.settleResult(row.market_id, resultYes, 'spot');
+        if (n > 0) log('shadow_spot_settled', { market_id: row.market_id, settled: n, strike: row.strike, spot_at_close: sp, result: resultYes ? 'yes' : 'no', via: product });
+        continue;
+      }
+    }
+    if (now > closeTs + 2 * 60 * 60 * 1000) {
+      const n = CALIB.abandon ? CALIB.abandon(row.market_id) : 0;
+      if (n > 0) log('shadow_zombie_swept', { market_id: row.market_id, closed_at: new Date(closeTs).toISOString() });
+    }
+  }
+}
+setInterval(() => { try { shadowFastSettle(); } catch (e) { } }, 30000);
+
 async function runAllNoLive() {
   const noLsX = laneState('all_no_markets');
   if (!noLsX || !noLsX.running) return;
@@ -3974,7 +4128,12 @@ async function runAllNoLive() {
   const open = state.live.positions.filter(p => p.strategy === 'all_no_markets' && p.qty > 0);
   const pending = (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && o.lane === 'all_no_markets');
   const exposure = open.reduce((a, p) => a + p.cost, 0) + pending.reduce((a, o) => a + Math.max(0, o.qty - (o.filled || 0)) * o.price, 0);
-  if (!(cash > 0)) { noLsX.last_skip = 'no live cash' + (cashUc ? '' : ' (balance read unavailable)'); return; }
+  // CASH vs EVIDENCE (2026-11-08): with transmission OFF no order will post,
+  // so an unavailable cash figure must not stop the pass either — the entry
+  // attempt still reaches openEntry's transmission gate and becomes a shadow.
+  // (Same lesson as the 429 storm: evidence collection never depends on the
+  // exchange.) With transmission ON, fail-closed on cash stands.
+  if (!(cash > 0) && !global.__KAI_TRANSMISSION_OFF) { noLsX.last_skip = 'no live cash' + (cashUc ? '' : ' (balance read unavailable)'); return; }
   if (exposure >= cash * cfg.max_exposure_pct) { noLsX.last_skip = 'portfolio heat limit'; return; }
   if (open.length + pending.length >= cfg.max_concurrent) { noLsX.last_skip = 'max concurrent positions'; return; }
   const busy = new Set(open.map(p => p.market_id));

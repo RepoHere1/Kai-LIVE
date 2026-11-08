@@ -66,6 +66,32 @@ node ledger.test.js      # ledger arithmetic
 node alpha_gate.test.js  # promotion gate
 ```
 
+## Transmission gate (operator order 2026-11-08)
+
+Live order transmission to Kalshi is **OFF** (`state.transmission_enabled`,
+default false, fail-closed). Everything else runs perfectly: lanes scan, size,
+decide; settlement, ledger, WS and cash ops all live. Chokepoints:
+
+- `kalshi.js placeOrderV2/cancelOrderV2` throw `KAI_TRANSMISSION_OFF` before any HTTP.
+- `live_engine openEntry` converts every would-be order into a **shadow**
+  (full context: fair, sigma, tau, strike, spot) settled against the real result.
+- Flip: `POST /api/ops/transmission {"enabled":true,"confirm":"TRANSMISSION"}`.
+- Regression: `node test-transmission-gate.js` (4/4).
+
+## SHADOW 2.0 + trading-hours law (2026-11-08)
+
+- **Fast settle** (30s tick): when a shadow's window closes (ts+tau), Coinbase
+  spot truth settles it (`close >= strike => YES`, the detective's own-db rule).
+  Kalshi's later finalize cross-checks; conflicts log `shadow_settle_conflict`.
+- **Zombie sweep**: pendings closed >2h and unpriceable get `outcome=-1`
+  (abandoned sentinel — excluded from stats and the boot backfill).
+- **Scoreboard** `GET /api/shadow`: expectancy (cents/contract) per hour, lane,
+  price-band and side from settled rows — the promotion dossier.
+- **Hours law**: 21Z/23Z entries refused (detective: toxic cells), still
+  shadowed. Config `state.runtime.trading_hours.blocked_utc` (empty = off).
+- Cash-unavailable no longer stops evidence: with transmission off, lanes
+  still reach the gate and shadow (429-storm lesson, applied).
+
 ## Hygiene law (2026-11-07)
 
 Session debris (one-off fix scripts, probe droppings, snapshot dumps) is

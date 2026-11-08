@@ -237,10 +237,16 @@ async function raw(acctName, method, route, opts) {
 //   read:   GET    /portfolio/orders/{order_id}
 // ---------------------------------------------------------------------------
 async function placeOrderV2(body) {
+  // TRANSMISSION GATE (operator order 2026-11-08): the LAST chokepoint before
+  // the wire. With transmission off, NOTHING that creates orders on the live
+  // account leaves this process (reads, balance, cash ops still pass). The
+  // engine converts would-be orders into shadows instead of calling here.
+  if (global.__KAI_TRANSMISSION_OFF) { const e = new Error('TRANSMISSION OFF (operator order 2026-11-08): order not transmitted - shadowed instead'); e.code = 'KAI_TRANSMISSION_OFF'; throw e; }
   if (global.__KAI_TRADE_BLOCKED) { const e = new Error('TRADE BLOCKED: safe mode'); e.code = 'KAI_SAFE_MODE'; throw e; }
   return raw('live', 'POST', '/portfolio/events/orders', { body });
 }
 async function cancelOrderV2(orderId, marketTicker) {
+  if (global.__KAI_TRANSMISSION_OFF) { const e = new Error('TRANSMISSION OFF (operator order 2026-11-08): cancel not transmitted'); e.code = 'KAI_TRANSMISSION_OFF'; throw e; }
   const query = marketTicker ? { market_ticker: marketTicker } : {};
   return raw('live', 'DELETE', '/portfolio/events/orders/' + encodeURIComponent(orderId), { query });
 }
