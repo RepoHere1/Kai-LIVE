@@ -1,25 +1,37 @@
-# KAI TAPE (DRY book) - event-driven terminal feed. Silent until something
-# happens: entries, closes, balance moves, server restarts. A PULSE line
-# every 5 minutes proves the heart is beating. Run:  .\tape.ps1
+# KAI TAPE (LIVE book) - event-driven terminal feed. The live screen is for
+# TRADES ONLY (ENTER/CLOSE/LANE CLOSE/BAL) plus operational truth (SERVER
+# DOWN/SLOW/RESTARTED). Everything that is not a trade - shadow events,
+# vaccine, detective, backtest, pulse - buffers and prints ONCE PER HOUR as
+# one block at the local top-of-the-hour (first block at startup).
+# Run:  .\tape.ps1
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'   # kills the blue "Reading web response" popup
 $Cfg = @{ Tag = 'LIVE'; Port = 8788 }
 
-Write-Host "==== KAI TAPE - LIVE book (events + 5-min pulse, Ctrl+C to stop) ====" -ForegroundColor White
+Write-Host "==== KAI TAPE - LIVE book (trades live + hourly report, Ctrl+C to stop) ====" -ForegroundColor White
 
 $knownClosed = @{}   # trade id -> $true
 $knownOpen = @{}     # position id -> $true
 $knownRT = @{}       # lane trade composite key -> $true (recent-trades feed)
-$lastPulseSig = ''   # last pulse state signature (suppress identical pulses)
 $lastAcct = $null    # real Kalshi account cash (catches DIRECT trades/deposits)
 $lastLanePnl = $null # lane book aggregate pnl (from /api/recent-trades total_pnl)
 $lastLaneCount = 0   # lane book total closed trades
-$lastBal = $null; $lastPnl = $null; $lastUptime = $null; $lastPulse = 0
+$lastBal = $null; $lastPnl = $null; $lastUptime = $null
 $balKnown = $false   # true only when the server reported a REAL balance
 
 $knownShadow = @{}   # shadow event key -> seen
 $shadowSeeded = $false
 $lastShadowPoll = 0
+
+# HOURLY REPORT (operator order 2026-11-08): everything that is not an actual
+# trade buffers here during the hour and prints ONCE, together, at the local
+# top-of-the-hour. The live screen stays chronological trades + server truth.
+$hourlyBuffer = [System.Collections.Generic.List[object]]::new()
+$shadowTally = @{ open = 0; win = 0; loss = 0; swept = 0 }
+$lastHourReported = -1
+function HourLine([string]$color, [string]$text) {
+  $script:hourlyBuffer.Add([pscustomobject]@{ color = $color; text = $text })
+}
 
 function J([string]$u) {
   try { return (Invoke-WebRequest -Uri $u -TimeoutSec 15 -UseBasicParsing).Content | ConvertFrom-Json } catch { return $null }
@@ -183,12 +195,19 @@ while ($true) {
         $knownShadow[$sk] = $true
         if (-not $shadowSeeded) { continue }
         if ($e.kind -eq 'SHADOW_OPEN') {
-          Line 'DarkMagenta' ("SHADOW OPEN {0} {1} @{2} claimed={3} adj={4} [{5}]" -f $e.market_id, $e.side, $e.price, $e.claimed, $e.adjusted, $e.strategy)
+          $script:shadowTally.open++
+          HourLine 'DarkMagenta' ("SHADOW OPEN {0} {1} @{2} claimed={3} adj={4} [{5}]" -f $e.market_id, $e.side, $e.price, $e.claimed, $e.adjusted, $e.strategy)
         } else {
           # OPERATOR SPEC (2026-11-07): a settled shadow keeps its full text, but
           # the color IS the verdict - WIN prints bright yellow, LOSS prints white.
+          # A settle with no outcome/pnl is a sweep - real labels, never blanks.
+          if ($e.outcome -eq 'WIN') { $script:shadowTally.win++ }
+          elseif ($e.outcome -eq 'LOSS') { $script:shadowTally.loss++ }
+          else { $script:shadowTally.swept++ }
+          $outTxt = if ($e.outcome) { $e.outcome } else { 'SWEPT' }
+          $pnlTxt = if ($null -ne $e.pnl) { $e.pnl } else { 'n/a' }
           $scol = if ($e.outcome -eq 'WIN') { 'Yellow' } else { 'White' }
-          Line $scol ("SHADOW {0} {1} {2} @{3} pnl={4} [{5}]" -f $e.outcome, $e.market_id, $e.side, $e.price, $e.pnl, $e.strategy)
+          HourLine $scol ("SHADOW {0} {1} {2} @{3} pnl={4} [{5}]" -f $outTxt, $e.market_id, $e.side, $e.price, $pnlTxt, $e.strategy)
         }
       }
     }
@@ -212,10 +231,11 @@ while ($true) {
 
   $nowSec = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
   $boots = if ($h -and $null -ne $h.boots) { $h.boots } elseif ($nb) { $nb.boots } else { '?' }
-  $stateSig = "$(BalTxt $lastBal)|$(BalTxt $lastPnl)|$lastLanePnl|$lastLaneCount|$(if ($nb) { @($nb.open_rows).Count } else { '?' })|$(if ($nb) { $nb.book.entries } else { '?' })|$boots"
-  if ($nowSec - $lastPulse -ge 300 -and ($stateSig -ne $lastPulseSig -or $nowSec - $lastPulse -ge 3600)) {
-    $lastPulse = $nowSec
-    $lastPulseSig = $stateSig
+  # HOURLY REPORT TRIGGER: fires once at startup, then exactly once per hour,
+  # on the LOCAL top-of-the-hour (matches the timestamps on screen).
+  $curHour = [int](Get-Date -Format 'yyyyMMddHH')
+  if ($curHour -ne $lastHourReported) {
+    $lastHourReported = $curHour
     $st = J "http://127.0.0.1:$($Cfg.Port)/api/strategies"
     $lanesOn = 0
     if ($st) { foreach ($p in $st.PSObject.Properties) { if ($p.Value.running) { $lanesOn++ } } }
@@ -233,7 +253,7 @@ while ($true) {
       $vcol = if ($warm.Count -eq 0) { 'DarkYellow' } elseif ($over.Count -gt $okBk.Count) { 'Red' } else { 'Green' }
       $wtxt = 'no warm buckets (n>=20) yet'
       if ($worst) { $wtxt = ("worst {0}: model {1} real {2} (n={3})" -f $worst.bucket, [Math]::Round([double]$worst.center,2), [Math]::Round([double]$worst.realized,2), $worst.n) }
-      Line $vcol ("VACCINE {0} warm buckets | {1} overstated / {2} ok | {3} | shadows {4}" -f $warm.Count, $over.Count, $okBk.Count, $wtxt, $(if ($null -ne $cal.pending_shadows_n) { $cal.pending_shadows_n } elseif ($null -ne $cal.pending_shadows -and $cal.pending_shadows -isnot [array]) { $cal.pending_shadows } else { 0 }))
+      HourLine $vcol ("VACCINE {0} warm buckets | {1} overstated / {2} ok | {3} | shadows {4} pending" -f $warm.Count, $over.Count, $okBk.Count, $wtxt, $(if ($null -ne $cal.pending_shadows_n) { $cal.pending_shadows_n } elseif ($null -ne $cal.pending_shadows -and $cal.pending_shadows -isnot [array]) { $cal.pending_shadows } else { 0 }))
     }
     # SHARDS: per-shard cash. Entries die with "shard funding" skips when the
     # target shard (2 = crypto/commodities) runs dry - this makes it visible.
@@ -251,7 +271,7 @@ while ($true) {
       $srcOk = 0
       if ($dtv.sources) { foreach ($sp in $dtv.sources.PSObject.Properties) { if ($sp.Value.ok) { $srcOk++ } } }
       $dcol = if ($dtop -and [double]$dtop.edge_per_contract -gt 0) { 'Yellow' } else { 'DarkCyan' }
-      Line $dcol ("DETECTIVE {0} edges | {1} | sources ok {2}/4" -f @($dtv.discovered).Count, $(if ($dtop) { "{0} {1} edge={2}/ct n={3}" -f $dtop.source, $dtop.rule, $dtop.edge_per_contract, $dtop.n_test } else { 'no confirmed edge yet (mining)' }), $srcOk)
+      HourLine $dcol ("DETECTIVE {0} edges | {1} | sources ok {2}/4" -f @($dtv.discovered).Count, $(if ($dtop) { "{0} {1} edge={2}/ct n={3}" -f $dtop.source, $dtop.rule, $dtop.edge_per_contract, $dtop.n_test } else { 'no confirmed edge yet (mining)' }), $srcOk)
     }
 
     # BACKTESTER ON THE TAPE: latest settled-market verdict per strategy, plus live
@@ -264,14 +284,23 @@ while ($true) {
       $vcount = @($bt.strategies | Group-Object verdict | ForEach-Object { "$($_.Name) $($_.Count)" }) -join ' | '
       $provenN = @($bt.strategies | Where-Object { $_.verdict -eq 'PROVEN' }).Count
       $bcol = if ($provenN -gt 0) { 'Green' } else { 'DarkYellow' }
-      Line $bcol ("BACKTEST {0} ({1}d, {2} strategies) | {3}" -f $bt.generated_at, $bt.window.days, @($bt.strategies).Count, $vcount)
+      HourLine $bcol ("BACKTEST {0} ({1}d, {2} strategies) | {3}" -f $bt.generated_at, $bt.window.days, @($bt.strategies).Count, $vcount)
     }
     $btLog = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Kai-Mirror') 'backtest_progress.log'
     if (Test-Path -LiteralPath $btLog) {
       $btAge = ((Get-Date) - (Get-Item -LiteralPath $btLog).LastWriteTime).TotalMinutes
-      if ($btAge -lt 10) { Line 'DarkCyan' ("BACKTEST RUNNING: {0}" -f (Get-Content -LiteralPath $btLog -Tail 1)) }
+      if ($btAge -lt 10) { HourLine 'DarkCyan' ("BACKTEST RUNNING: {0}" -f (Get-Content -LiteralPath $btLog -Tail 1)) }
     }
-    Line 'DarkCyan' ("PULSE alive | bal `${0} | all_no `${1} (n={2}) | lanes `${3} (n={4}) | TOTAL `${5} | acct `${6} | lanes {7} on | uptime {8}m | boots {9}" -f (BalTxt $lastBal), (BalTxt $lastPnl), ($(if ($nb) { $nb.book.entries } else { '?' })), (BalTxt $lastLanePnl), $lastLaneCount, $totPnl, ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60), $boots)
+    HourLine 'DarkCyan' ("PULSE alive | bal `${0} | all_no `${1} (n={2}) | lanes `${3} (n={4}) | TOTAL `${5} | acct `${6} | lanes {7} on | uptime {8}m | boots {9}" -f (BalTxt $lastBal), (BalTxt $lastPnl), ($(if ($nb) { $nb.book.entries } else { '?' })), (BalTxt $lastLanePnl), $lastLaneCount, $totPnl, ($(if ($lastAcct -ne $null) { [Math]::Round($lastAcct,2) } else { '?' })), $lanesOn, [int]($lastUptime/60), $boots)
+
+    # ---- FLUSH: one block, once per hour - tally, then buffered shadow
+    # events (oldest first), then the status lines just generated above. ----
+    Line 'White' ("================ HOURLY REPORT {0}:00 | shadows buffered: {1} ================" -f (Get-Date -Format 'HH'), ($script:shadowTally.open + $script:shadowTally.win + $script:shadowTally.loss + $script:shadowTally.swept))
+    Line 'DarkMagenta' ("SHADOWS this hour: {0} opened / {1} wins / {2} losses / {3} swept" -f $script:shadowTally.open, $script:shadowTally.win, $script:shadowTally.loss, $script:shadowTally.swept)
+    foreach ($bl in $script:hourlyBuffer) { Line $bl.color $bl.text }
+    Line 'White' ("================ end hourly report ================")
+    $script:hourlyBuffer.Clear()
+    $script:shadowTally = @{ open = 0; win = 0; loss = 0; swept = 0 }
   }
 
   Start-Sleep -Seconds 5
