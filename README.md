@@ -106,6 +106,12 @@ Even with the transmission gate armed it stays paper. Deliberate real-money
 losses have zero evidentiary value the shadow doesn't already capture; the
 gate remains the ONLY real-money key.
 
+**v4 parity with Mirror (2026-11-08)**: real Kalshi fee formula (0.07·p·(1−p)·qty)
+on every sabotage trade; CROSSED-SPREAD lane (buys both asks when crossed —
+deterministic spread burn, tagged `crossed-spread`, mirror not executable);
+notional $2.00; max 100 concurrent; feeds: all 9 gate refusals, recal-at-live-bid
+refusal, opposite of every would-be LIVE order (transmission_shadow site).
+
 ## Hygiene law (2026-11-07)
 
 Session debris (one-off fix scripts, probe droppings, snapshot dumps) is

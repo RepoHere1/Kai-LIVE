@@ -2326,6 +2326,7 @@ async function noBook() {
       // 2026-11-04 OPERATOR ORDER: one-sided books are tradable. We POST at the
       // bid, so a NO entry only needs a real NO bid. Quote sanity still applies.
       if (q.facts_ok === false) continue;   // DATA INTEGRITY: payload failed verification
+      sabotageCross(q); // guaranteed-loss lane (paper): buys BOTH asks when crossed - the spread burns
       if (!no_bid || no_bid <= 0.02 || (no_ask != null && no_ask >= 0.98)) continue;
       
       // Spread only where both sides exist; a one-sided book has no spread to test.
@@ -4115,7 +4116,7 @@ const SHADOW_ASSET_PRODUCT = { btc: 'BTC-USD', eth: 'ETH-USD', xrp: 'XRP-USD', h
 // vaccine refusal - sabotage buys the MODEL-OVERPRICED side. Settled by
 // Coinbase spot at close; /api/inverse shows sabotage vs its exact mirror.
 // ---------------------------------------------------------------------------
-const SABOTAGE_DEFAULTS = { enabled: true, balance_start: 100, notional_dollars: 0.50, max_concurrent: 60, recharge_below: 10, recharge_to: 100 };
+const SABOTAGE_DEFAULTS = { enabled: true, balance_start: 100, notional_dollars: 2.00, max_concurrent: 100, recharge_below: 10, recharge_to: 100 };
 const SAB_COOLDOWN_MS = 90 * 1000;
 const sabTried = new Map();
 function sabotageState() {
@@ -4161,18 +4162,19 @@ function sabotageBook(position) {
     }
     if (!(price >= 0.01 && price <= 0.99)) return;
     const qty = Math.max(1, Math.floor(SABOTAGE_DEFAULTS.notional_dollars / price));
-    const cost = Number((qty * price).toFixed(2));
+    const fee = Number((0.07 * price * (1 - price) * qty).toFixed(4)); // REAL Kalshi fee formula - designed losers pay fees like real trades
+    const cost = Number((qty * price + fee).toFixed(2));
     if (cost > sb.balance) return;
     sb.balance = Number((sb.balance - cost).toFixed(2));
     sabTried.set(position.market_id, Date.now());
     sb.positions.push({
-      market_id: position.market_id, side, price, qty, cost,
+      market_id: position.market_id, side, price, qty, cost, fee,
       close_time: position.expiration, strike: position.strike != null ? position.strike : null,
       opened_at: new Date().toISOString(),
       source: isRefusal ? 'bought-the-refusal' : 'opposite-of:' + (position.strategy || '?'),
     });
     sb.stats.opened++;
-    log('sabotage_entry', { market_id: position.market_id, side, px: price, qty, closes: position.expiration, faded_engine_choice: position.side + '@' + position.entry_price, source: isRefusal ? 'the overpriced side the vaccine refused' : 'opposite of the would-be LIVE order', note: 'SHADOW ONLY - paper, quarantined, can never transmit' });
+    log('sabotage_entry', { market_id: position.market_id, side, px: price, qty, fee, closes: position.expiration, faded_engine_choice: position.side + '@' + position.entry_price, source: isRefusal ? 'the overpriced side the vaccine refused' : 'opposite of the would-be LIVE order', note: 'SHADOW ONLY - paper, quarantined, can never transmit' });
   } catch (e) { try { log('sabotage_error', { error: String(e && e.message || e).slice(0, 200) }); } catch (e2) { } }
 }
 
@@ -4195,11 +4197,11 @@ function sabotageSettle() {
       }
       if (outcome === null && now > closeTs + 3 * 60 * 60 * 1000) { outcome = false; via = 'zombie-close'; }
       if (outcome === null) continue;
-      const pnl = Number(((outcome ? (1 - p.price) : -p.price) * p.qty).toFixed(4));
+      const pnl = Number((((outcome ? (1 - p.price) : -p.price) * p.qty) - (p.fee || 0)).toFixed(4));
       const mirrorPnl = Number((-pnl).toFixed(4));
       sb.balance = Number((sb.balance + (outcome ? p.qty : 0)).toFixed(2));
       sb.positions.splice(sb.positions.indexOf(p), 1);
-      sb.history.push({ at: new Date().toISOString(), market_id: p.market_id, side: p.side, px: p.price, qty: p.qty, outcome: outcome ? 'WIN' : 'LOSS', pnl, mirror_pnl: mirrorPnl, via });
+      sb.history.push({ at: new Date().toISOString(), market_id: p.market_id, side: p.side, px: p.price, qty: p.qty, outcome: outcome ? 'WIN' : 'LOSS', pnl, mirror_pnl: mirrorPnl, fee: p.fee || 0, src: p.source || '?', via });
       if (sb.history.length > 2000) sb.history.splice(0, sb.history.length - 2000);
       if (outcome) sb.stats.wins++;
       sb.stats.settled++;
@@ -4210,6 +4212,43 @@ function sabotageSettle() {
   } catch (e) { try { log('sabotage_error', { error: String(e && e.message || e).slice(0, 200) }); } catch (e2) { } }
 }
 setInterval(() => { try { sabotageSettle(); } catch (e) { } }, 60000);
+
+// THE CROSSED-SPREAD LANE (copied from Mirror v4 per operator order
+// 2026-11-08): when a market's asks are crossed (yes_ask + no_ask > 1), buy
+// BOTH sides at their asks. Exactly one leg settles to 1 - the pair ALWAYS
+// loses (sum - 1) per unit plus fees on both legs. Deterministic
+// spread-burning. SHADOW ONLY in this repo - paper, can never transmit.
+// Mirror of these rows is arithmetic, not executable - tagged crossed-spread.
+function sabotageCross(q) {
+  try {
+    if (!SABOTAGE_DEFAULTS.enabled) return;
+    const ya = Number(q.yes_ask), na = Number(q.no_ask);
+    if (!Number.isFinite(ya) || !(ya > 0) || !Number.isFinite(na) || !(na > 0)) return;
+    const sum = Number((ya + na).toFixed(4));
+    if (sum <= 1.0) return;                    // must be crossed: guaranteed loss = sum - 1
+    const sb = sabotageState();
+    if (sb.balance < 5) return;                // recharge happens on the next regular entry
+    const key = 'X:' + q.ticker;
+    const t = sabTried.get(key);
+    if (t && Date.now() - t < SAB_COOLDOWN_MS) return;
+    const closeTs = Date.parse(q.close_time);
+    if (!Number.isFinite(closeTs) || closeTs < Date.now() + 60000) return;
+    if (sb.positions.length >= SABOTAGE_DEFAULTS.max_concurrent - 2) { sb.stats.skips++; return; }
+    sabTried.set(key, Date.now());
+    for (const leg of [['YES', ya], ['NO', na]]) {
+      const price = Math.round(leg[1] * 100) / 100;
+      if (!(price >= 0.01 && price <= 0.99)) continue;
+      const qty = 1;
+      const fee = Number((0.07 * price * (1 - price) * qty).toFixed(4));
+      const cost = Number((qty * price + fee).toFixed(2));
+      if (cost > sb.balance) return;
+      sb.balance = Number((sb.balance - cost).toFixed(2));
+      sb.positions.push({ market_id: q.ticker, side: leg[0], price, qty, cost, fee, close_time: q.close_time, strike: q.strike != null ? q.strike : null, opened_at: new Date().toISOString(), source: 'crossed-spread' });
+      sb.stats.opened++;
+    }
+    log('sabotage_cross', { market_id: q.ticker, yes_ask: ya, no_ask: na, guaranteed_loss_per_unit: Number((sum - 1).toFixed(4)), note: 'both sides bought at the asks (paper) - the spread burns, deterministically' });
+  } catch (e) { try { log('sabotage_error', { error: String(e && e.message || e).slice(0, 200) }); } catch (e2) { } }
+}
 
 function spotAtClose(product, tsSec) {
   const s = spot[product];
