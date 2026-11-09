@@ -1758,10 +1758,16 @@ function paint(s) {
           ? 'cost unknown (' + (k.cost_basis_missing || 0) + ' holding' +
             (k.cost_basis_missing === 1 ? '' : 's') + ' predate fill history)'
           : 'cost n/a')));
-    set('tKalshiPnl', money(k.realized));
-    const kr = document.getElementById('tKalshiPnl');
-    if (kr) kr.className = 'v ' + sgn(k.realized || 0);
     const led = k.ledger || {};
+    // TRUTH FIX (2026-11-08): headline used k.realized (reads $0.00) while the
+    // sub-line showed the real settled money. Headline = ledger truth:
+    // sales + settlements - fees. Fallback only when ledger absent.
+    const ledgerRealized = (led.sales_realized != null || led.settlement_realized != null)
+      ? (Number(led.sales_realized) || 0) + (Number(led.settlement_realized) || 0) - (Number(k.fees) || 0)
+      : (Number(k.realized) || 0);
+    set('tKalshiPnl', money(ledgerRealized));
+    const kr = document.getElementById('tKalshiPnl');
+    if (kr) kr.className = 'v ' + sgn(ledgerRealized || 0);
     set('tKalshiPnlNote',
       'sales ' + money(led.sales_realized) +
       ' - settled ' + money(led.settlement_realized) +
