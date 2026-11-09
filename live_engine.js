@@ -639,6 +639,12 @@ function pendingExposure() {
       ls.skips++;
       ls.last_skip = 'transmission OFF (operator): shadowed instead';
       log('transmission_shadow', { lane: lane.name, ticker: q.ticker, side, price, fair, edge });
+      // SABOTAGE BOOK (operator order 2026-11-08): the quarantined SHADOW-ONLY
+      // losing book takes the OPPOSITE side of this would-be LIVE order. It
+      // writes paper state only - it has no path to placeOrderV2 and cannot
+      // transmit even when the gate is armed. The opposite of every LIVE
+      // decision, measured for free.
+      try { if (deps.sabotageMirror) deps.sabotageMirror({ strategy: 'opposite-of-live:' + (lane && lane.name || '?'), market_id: q.ticker, side, entry_price: price, expiration: q.close_time, strike: q.strike != null ? q.strike : null }); } catch (e) { }
       return null;
     }
     // ALPHA GATE (2026-11-06): the right to trade real money is earned from

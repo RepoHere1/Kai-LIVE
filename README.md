@@ -92,6 +92,20 @@ decide; settlement, ledger, WS and cash ops all live. Chokepoints:
 - Cash-unavailable no longer stops evidence: with transmission off, lanes
   still reach the gate and shadow (429-storm lesson, applied).
 
+## SABOTAGE BOOK - SHADOW-ONLY PORT (operator order 2026-11-08)
+
+Mirror's designed-to-lose book, ported into LIVE as a **shadow-only instrument**.
+It buys the MODEL-OVERPRICED side of every refused candidate (all 9 gate sites)
+and takes the OPPOSITE side of every would-be LIVE order (transmission_shadow
+site in live_engine openEntry). Settles on Coinbase spot; `GET /api/inverse`
+shows sabotage P&L vs its exact mirror.
+
+**HARD BLOCK**: this book can NEVER transmit a real order — it holds no kalshi
+reference and no engine entry path; it writes only `state.sabotage` (paper).
+Even with the transmission gate armed it stays paper. Deliberate real-money
+losses have zero evidentiary value the shadow doesn't already capture; the
+gate remains the ONLY real-money key.
+
 ## Hygiene law (2026-11-07)
 
 Session debris (one-off fix scripts, probe droppings, snapshot dumps) is
