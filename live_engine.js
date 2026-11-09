@@ -121,9 +121,15 @@ function create(deps) {
       // null for the whole process (observed: two 429s at boot, then silence
       // for 30+ minutes while the endpoint had recovered). The race guarantees
       // this function always settles in <=20s so the backoff ladder keeps run.
+      // 2026-11-09 WIDENED (dashboard truth fix): raw() retries internally up
+      // to 4 x 15s - a dead keep-alive socket burns the first attempt, the
+      // pool rebuilds, and attempt 2 succeeds (~1.7s measured). The old 20s
+      // race killed the WHOLE ladder after one dead socket: every read
+      // 'timed out', the backoff grew to 30min, and the cash ledger never
+      // anchored (balance tile '-'). 75s covers the full internal ladder.
       const b = await Promise.race([
         kalshi.raw('live', 'GET', '/portfolio/balance', { noRetry429: true }),
-        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('balance read timed out after 20s')), 20000); if (t.unref) t.unref(); }),
+        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('balance read timed out after 75s')), 75000); if (t.unref) t.unref(); }),
       ]);
       const dollars = num(b.balance_dollars);
       const cents = num(b.balance);
@@ -396,6 +402,11 @@ function create(deps) {
     const a = snapshot();
     const rows = marketRows();
     const markets = rows.filter((r) => r.held);
+    // 2026-11-09 HELD-ONLY TRUTH FIX: Kalshi keeps a zero-share event row for
+    // every event the account ever touched. Summing ALL rows' costs printed a
+    // phantom 'cost $1135.72' next to exposure $0.00 with nothing held. Only
+    // rows with live shares count toward cost_basis (same held rule as market
+    // rows).
     const events = eventRows.map((e) => ({
       event_ticker: e.event_ticker,
       shares: num(e.total_cost_shares_fp) ?? 0,
@@ -403,7 +414,7 @@ function create(deps) {
       exposure: num(e.event_exposure_dollars) ?? 0,
       realized: num(e.realized_pnl_dollars) ?? 0,
       fees: num(e.fees_paid_dollars) ?? 0,
-    }));
+    })).filter((e) => e.shares !== 0);
     const alive = stream.secondsSinceAlive();
     return {
       as_of: a.as_of,
@@ -639,12 +650,6 @@ function pendingExposure() {
       ls.skips++;
       ls.last_skip = 'transmission OFF (operator): shadowed instead';
       log('transmission_shadow', { lane: lane.name, ticker: q.ticker, side, price, fair, edge });
-      // SABOTAGE BOOK (operator order 2026-11-08): the quarantined SHADOW-ONLY
-      // losing book takes the OPPOSITE side of this would-be LIVE order. It
-      // writes paper state only - it has no path to placeOrderV2 and cannot
-      // transmit even when the gate is armed. The opposite of every LIVE
-      // decision, measured for free.
-      try { if (deps.sabotageMirror) deps.sabotageMirror({ strategy: 'opposite-of-live:' + (lane && lane.name || '?'), market_id: q.ticker, side, entry_price: price, expiration: q.close_time, strike: q.strike != null ? q.strike : null }); } catch (e) { }
       return null;
     }
     // ALPHA GATE (2026-11-06): the right to trade real money is earned from

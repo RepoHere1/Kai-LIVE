@@ -484,7 +484,7 @@ body{color:#e9e9e9}div,span,td,th,li,p,label,h1,h2,h3,.v,.k,.s,.num,.mono,.badge
   <div class="tile">
     <div class="k">Strategies live</div>
     <div class="v" id="tRunning">9</div>
-    <div class="s">of 9 available</div>
+    <div class="s" id="tRunningNote">of 9 available</div>
   </div>
 </div>
 
@@ -1752,12 +1752,14 @@ function paint(s) {
           ' flat rows on Kalshi\'s side (no shares, cannot be deleted)');
     set('tExposure', money(k.exposure));
     set('tExposureNote',
-      'mark-to-market - ' + (k.cost_basis_known
-        ? 'cost ' + money(k.cost_basis)
-        : (k.realized_known
-          ? 'cost unknown (' + (k.cost_basis_missing || 0) + ' holding' +
-            (k.cost_basis_missing === 1 ? '' : 's') + ' predate fill history)'
-          : 'cost n/a')));
+      (held || 0) === 0
+        ? 'flat - no open positions'
+        : 'mark-to-market - ' + (k.cost_basis_known
+          ? 'cost ' + money(k.cost_basis)
+          : (k.realized_known
+            ? 'cost unknown (' + (k.cost_basis_missing || 0) + ' holding' +
+              (k.cost_basis_missing === 1 ? '' : 's') + ' predate fill history)'
+            : 'cost n/a')));
     const led = k.ledger || {};
     // TRUTH FIX (2026-11-08): headline used k.realized (reads $0.00) while the
     // sub-line showed the real settled money. Headline = ledger truth:
@@ -1769,10 +1771,12 @@ function paint(s) {
     const kr = document.getElementById('tKalshiPnl');
     if (kr) kr.className = 'v ' + sgn(ledgerRealized || 0);
     set('tKalshiPnlNote',
-      'sales ' + money(led.sales_realized) +
-      ' - settled ' + money(led.settlement_realized) +
-      ' - fees ' + money(k.fees) +
-      (led.window_start ? ' - since ' + String(led.window_start).slice(0, 10) : ''));
+      (led.sales_realized != null || led.settlement_realized != null)
+        ? ('sales ' + money(led.sales_realized) +
+           ' + settled ' + money(led.settlement_realized) +
+           ' - fees ' + money(k.fees) +
+           (led.window_start ? ' - since ' + String(led.window_start).slice(0, 10) : ''))
+        : ('Kalshi stream: ' + money(k.realized) + ' realized - fees paid ' + money(k.fees) + ' (lifetime) - ledger split n/a'));
 
     // The LIVE funding card on this page: the real production account.
     const lv = (s.accounts && s.accounts.live) || {};
@@ -1811,6 +1815,7 @@ function paint(s) {
   set('dRet', (d.dry && d.dry.win_rate ? d.dry.win_rate : 0) + '%');
   set('tAiSpend', money(d.ai_cost_today));
   set('tRunning', s.running_count || 0);
+  set('tRunningNote', 'of ' + ((s.strategy_cards || []).length || (s.running_count || 0)) + ' available');
   set('tUptime', Math.floor((s.uptime_sec || 0) / 60) + 'm');
 
   LIVE.equity = s.equity || LIVE.equity;
