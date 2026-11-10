@@ -27,6 +27,9 @@ const EXIT_RETRY_MS = 3 * 1000;
 const CASH_BUFFER = 0.10;
 const BALANCE_MIN_GAP_MS = 60 * 1000;
 const BALANCE_RECONCILE_MS = 5 * 60 * 1000;
+// DOUBLE-FILL GUARD state (2026-11-10): markets with an entry currently in
+// flight - see the guard at the top of openEntry.
+const LIVE_ENTRY_INFLIGHT = new Set();
 
 const f2 = (x) => (Math.round(x * 100) / 100).toFixed(2);
 const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : null; };
@@ -604,6 +607,28 @@ function pendingExposure() {
 
   // ---- entries -------------------------------------------------------------------------------
   async function openEntry(lane, q, side, price, fair, edge, sigma, opts) {
+    // DOUBLE-FILL GUARD (2026-11-10): KXXRP15M-26OCT310215-15 filled twice 35ms
+    // apart on Oct 31 (two all_no entry paths - scanner pass + brain pass - both
+    // passed their per-pass busy checks before either position landed in the
+    // book; both legs then lost). openEntry is the single chokepoint for every
+    // real order: a market already held (any lane - one economic position per
+    // market) or with an entry still in flight is refused here, synchronously,
+    // before any await can open the race window again. The 30s self-clear keeps
+    // a wedged marker from blocking a market forever.
+    const _dupTicker = q && q.ticker;
+    if (_dupTicker) {
+      if (LIVE_ENTRY_INFLIGHT.has(_dupTicker)) {
+        log('double_entry_refused', { ticker: _dupTicker, lane: lane && lane.name, phase: 'in-flight' });
+        return null;
+      }
+      const _held = ((st().live && st().live.positions) || []).some(p => p.market_id === _dupTicker && p.qty > 0);
+      if (_held) {
+        log('double_entry_refused', { ticker: _dupTicker, lane: lane && lane.name, phase: 'already-held' });
+        return null;
+      }
+      LIVE_ENTRY_INFLIGHT.add(_dupTicker);
+      setTimeout(() => { try { LIVE_ENTRY_INFLIGHT.delete(_dupTicker); } catch (e) { } }, 30000);
+    }
     // OPERATOR RULE (2026-11-06): markets are unrestricted; a TRADE must close
     // within 30 days of opening. Entries whose market closes further out are refused.
     const hold = holdRule.entryAllowed(q && q.close_time, Date.now());

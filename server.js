@@ -801,7 +801,7 @@ function defaultState() {
       min_tau_sec: 60,
       max_tau_sec: 3600,
       max_hold_pct: 0.8,
-      scan_interval_ms: 10000
+      scan_interval_ms: 20000
     },
     // CERTAINTY LANE runtime overrides (certainty.js DEFAULTS fill the rest;
     // certaintyCfg() re-clamps min_prob>=0.90 etc. so this can never loosen
@@ -1322,7 +1322,11 @@ async function fetchOptionsChain(series) {
 async function marketsForSeries(series, limit) {
   const key = series + ':' + (limit || 5);
   const hit = marketCache.get(key);
-  if (hit && Date.now() - hit.at < 30000) return hit; // static only; bids stream in via quote_stream
+  // Static-only cache (bids stream in via quote_stream). SUCCESS stays at 30s
+  // for quote freshness, but a FAILED fetch cools down for 180s: under IP-level
+  // 429 saturation (both books share one IP) a failing series re-hammered every
+  // 30s kept the budget permanently exhausted (ported from Mirror 926f5b1).
+  if (hit && Date.now() - hit.at < (hit.source === 'error' ? 180000 : 30000)) return hit;
   try {
     const r = await kalshi.get('/markets', { query: { limit: limit || 5, status: 'open', series_ticker: series }, ttlMs: 1500 });
     const ms = ((r.data && r.data.markets) || []).map(quoteFromMarket);
@@ -2446,7 +2450,13 @@ async function noBook() {
 }
 
 // Fetch ALL tradable Kalshi series (not just LANES)
+// 30s memo (2026-11-10): this limit-500 discovery call had NO caching on LIVE -
+// every scan pass hit the public /markets budget directly (Mirror got ttlMs
+// 30000 in 926f5b1; LIVE called kalshi.raw uncached). OI rankings are stable
+// across a 20s pass cadence, so a 30s memo removes ~all of that pressure.
+let _seriesMemo = null;
 async function getAllTradableSeries() {
+  if (_seriesMemo && Date.now() - _seriesMemo.at < 30000) return _seriesMemo.list;
   try {
     const data = await kalshi.raw('dry', 'GET', '/markets', { query: { status: 'open', limit: 500 } });
     
@@ -2462,10 +2472,14 @@ async function getAllTradableSeries() {
     // COMBAT: series discovered by kind (handles rotated/delayed 1-hour ids)
     // always make the scan list, even before they rank by open interest.
     const kindSeries = Object.values(series_kind.cache).map(c => c && c.series).filter(Boolean);
-    return Array.from(new Set([...lanesSeries, ...kindSeries, ...ranked])).slice(0, 30);
+    const list = Array.from(new Set([...lanesSeries, ...kindSeries, ...ranked])).slice(0, 30);
+    _seriesMemo = { at: Date.now(), list };
+    return list;
   } catch (e) {
     // Fallback to LANES series
-    return Array.from(new Set(LANES.flatMap(l => l.seriesList || []).filter(Boolean)));
+    const list = Array.from(new Set(LANES.flatMap(l => l.seriesList || []).filter(Boolean)));
+    _seriesMemo = { at: Date.now(), list };
+    return list;
   }
 }
 // ---------------------------------------------------------------------------
@@ -4482,9 +4496,12 @@ async function boot() {
   // the Oct 26 config surgery, so this read `undefined` -> setInterval fired
   // every 1ms -> thousands of overlapping passes pinned ~64MB/min of async
   // frames during the Kalshi 429 outage -> 4GB heap death. The interval is now
-  // CLAMPED (>= 2s, default 10s) and a busy-flag skips a tick while a pass is
-  // still in flight, so passes can never overlap-pile.
-  const ALL_NO_SCAN_MS = Math.max(2000, Number(state.runtime.all_no && state.runtime.all_no.scan_interval_ms) || 10000);
+  // CLAMPED (>= 2s, default 20s) and a busy-flag skips a tick while a pass is
+  // still in flight, so passes can never overlap-pile. Default raised 10s->20s
+  // 2026-11-10 (shared-IP 429 diet, matches Mirror 926f5b1): the doubled pass
+  // rate bought nothing and burned the public /markets budget that the balance
+  // reader (signed /portfolio/balance, same IP) then 429'd against.
+  const ALL_NO_SCAN_MS = Math.max(2000, Number(state.runtime.all_no && state.runtime.all_no.scan_interval_ms) || 20000);
   let allNoPassInFlight = false;
   setInterval(() => {
     if (allNoPassInFlight) return;
