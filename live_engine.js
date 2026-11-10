@@ -692,6 +692,15 @@ function pendingExposure() {
       if (av && av.max_qty != null) {
         opts = Object.assign({}, opts, { maxQty: Math.min((opts && opts.maxQty) || av.max_qty, av.max_qty) });
       }
+      // REHAB BAR (2026-11-10): a lane on probation trades only above its
+      // corrected entry bar - the treatment IS the higher bar.
+      if (av && av.min_edge != null) {
+        if (edge == null || edge < av.min_edge) {
+          ls.skips++; ls.last_skip = 'rehab bar: edge ' + (edge != null ? Number(edge).toFixed(3) : '?') + ' < ' + av.min_edge;
+          log('rehab_bar_refused', { lane: lane.name, ticker: q.ticker, edge: edge, bar: av.min_edge });
+          return null;
+        }
+      }
     }
     // FEED GATE (2026-11-06): a stale spot feed turns every fair value into
     // fiction - the certainty thesis specifically (settlement is priced from

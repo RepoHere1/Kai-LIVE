@@ -39,6 +39,7 @@ function create(deps) {
   const getTrades = (deps && deps.getTrades) || (() => []);
   const certaintyStats = (deps && deps.certaintyStats) || (() => null);
   const vaccine = (deps && deps.vaccine) || (() => null);
+  const rehab = (deps && deps.rehab) || null;
   const log = (deps && deps.log) || (() => {});
   const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : 0; };
 
@@ -151,10 +152,19 @@ function create(deps) {
       }
     }
     const maxQty = v.verdict === 'refuted' ? 0 : (v.verdict === 'proven' ? null : 1);
-    return {
+    const base = {
       lane: laneName, allowed: v.verdict !== 'refuted', verdict: v.verdict, max_qty: maxQty,
       reason: (scope === 'pooled' ? 'pooled family: ' : '') + v.reason,
     };
+    // MEDICAL INTERVENTION (2026-11-10, operator commission): a refuted lane
+    // is diagnosed - if its own record replays positive under a corrected
+    // entry bar it returns on probation (1 contract, that bar); if not, it
+    // goes to hospice with the reason on the record. See rehab.js.
+    if (base.verdict === 'refuted' && rehab) {
+      const o = rehab.evaluate(laneName, 'refuted');
+      if (o) return Object.assign({}, o, { lane: laneName, rehab: true });
+    }
+    return base;
   }
 
   function report() {

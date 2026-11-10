@@ -1036,8 +1036,20 @@ CALIB.init().catch((e) => { console.error('[calibration] boot failed:', e.messag
 // from outcomes only - closed live trades for mid-book lanes, the certainty
 // ledger for the certainty lane, the vaccine backtest as corroboration. No
 // config assertion can unlock a refuted lane. See alpha_gate.js.
+// REHAB (2026-11-10, operator commission): medical intervention for refuted
+// lanes - diagnose (what KIND of bad), treat with a corrected entry bar when
+// the lane's own record replays positive under one, return on 1-contract
+// probation, hospice when incurable. Second strike on probation is permanent.
+state.runtime = state.runtime || {};
+if (!state.runtime.rehab) state.runtime.rehab = {};
+const REHAB = require('./rehab').create({
+  getTrades: () => (state.live && state.live.closed) || [],
+  getRecords: () => state.runtime.rehab,
+  log: (k, o) => { try { log(k, o); } catch (e) {} },
+});
 const ALPHA = require('./alpha_gate').create({
   getTrades: () => (state.live && state.live.closed) || [],
+  rehab: REHAB,
   certaintyStats: () => { try { return FACTS.certaintyStats(); } catch (e) { return null; } },
   vaccine: () => { try { return (CALIB.snapshot() || {}).vaccine_gate || null; } catch (e) { return null; } },
   log: (k, o) => { try { log(k, o); } catch (e) {} },
@@ -1096,6 +1108,20 @@ function noteStateWriteError(stage, err) {
   try { console.error('[state] write failed at ' + stage + ': ' + msg); } catch (e) { }
   try { log('state_write_error', { stage, error: msg, count: stateWriteErrors }); } catch (e) { }
 }
+// EVENT-LOOP LAG MONITOR (2026-11-10): the tape's SERVER SLOW lines persisted
+// even after health stopped awaiting balances - the remaining blocker is the
+// synchronous state write below. This monitor measures whatever still stalls
+// the loop and surfaces it in /api/health so the next stall is a number.
+var LOOP_LAG_MAX = 0;
+setInterval(() => {
+  const t0 = Date.now();
+  setImmediate(() => {
+    const lag = Date.now() - t0;
+    if (lag > LOOP_LAG_MAX) LOOP_LAG_MAX = lag;
+    if (lag >= 1000) { try { log('loop_lag', { ms: lag }); } catch (e) { } }
+  });
+}, 5000);
+setInterval(() => { LOOP_LAG_MAX = 0; }, 5 * 60 * 1000); // 5-minute max window
 function writeStateAtomic() {
   // ATOMIC REPLACE. Write temp -> fsync -> rename. The old writeFileSync could
   // leave a half-written state.json if the process was killed mid-save, and the
@@ -1133,8 +1159,49 @@ function save() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    writeStateAtomic();
+    let payload = null;
+    try { payload = safeStringify(state); } catch (e) { noteStateWriteError('stringify', e); return; }
+    writeChain = writeChain.then(() => writeStateAsync(payload)).catch(() => {});
   }, 250);
+}
+// ASYNC STATE WRITES (2026-11-10): the tape's SERVER SLOW lines were health
+// timeouts on a static endpoint - the only possible cause is a blocked event
+// loop, and the blocker was writeStateAtomic's synchronous write+fsync+rename
+// of the ~762KB state.json (plus the 15s copyFileSync backup) on every
+// debounced save. The hot path moves the entire write/fsync/rename/copy onto
+// the thread pool via fs.promises; durability is kept (FileHandle.sync() is
+// the async fsync). The synchronous writeStateAtomic remains ONLY for the
+// shutdown flush, where a blocking write is exactly what is wanted.
+let writeChain = Promise.resolve();
+function writeStateAsync(payload) {
+  const tmp = STATE_TMP_FILE + '.' + process.pid;
+  return (async () => {
+    try {
+      const fh = await fs.promises.open(tmp, 'w');
+      try { await fh.writeFile(payload); await fh.sync(); } finally { await fh.close(); }
+    } catch (e) {
+      noteStateWriteError('write', e);
+      try { await fs.promises.unlink(tmp); } catch (e2) { }
+      return false;
+    }
+    try {
+      await fs.promises.rename(tmp, STATE_FILE);
+    } catch (e) {
+      noteStateWriteError('rename-fallback', e);
+      try {
+        await fs.promises.writeFile(STATE_FILE, payload);
+        await fs.promises.unlink(tmp);
+      } catch (e2) { noteStateWriteError('write', e2); return false; }
+    }
+    try {
+      const now = Date.now();
+      if (!writeStateAtomic._last || now - writeStateAtomic._last > 15000) {
+        await fs.promises.copyFile(STATE_FILE, STATE_BACKUP_FILE);
+        writeStateAtomic._last = now;
+      }
+    } catch (e) { }
+    return true;
+  })();
 }
 function laneState(name) {
   if (!state.lanes[name]) {
@@ -2834,7 +2901,7 @@ async function handle(req, res) {
     // block could stall 20s - the tape's SERVER SLOW lines) and NEVER shows a
     // persisted snapshot. It reports the live engine truth: a number with a
     // source and age, or an honest null with the error.
-    return json(res, { ok: true, safe_mode: !!state.safe_mode, state_source: state.state_source || 'primary', boots: state.boot_count || 0, pid: process.pid,
+    return json(res, { ok: true, safe_mode: !!state.safe_mode, state_source: state.state_source || 'primary', boots: state.boot_count || 0, pid: process.pid, loop_lag_ms_max: LOOP_LAG_MAX,
       mode: state.mode, uptime_sec: Math.round((Date.now() - new Date(state.booted_at).getTime()) / 1000),
       // TAPE BLOCK (operator order 2026-11-05): the watchdog heartbeat prints
       // this so the tape shows vaccine + shard + gate + memory state every
@@ -2967,6 +3034,9 @@ if (p === '/api/calibration') {
    // Measured-edge verdicts (2026-11-06): what may trade real money, and why.
    return json(res, ALPHA.report());
  }
+  // MEDICAL INTERVENTION, VISIBLE: what the rehab unit is doing to each
+  // refuted lane (diagnosis, treatment bar, probation cohort, hospice).
+  if (p === '/api/rehab') return json(res, REHAB.report());
   if (p === '/api/ops/seed-cash' && method === 'POST') {
     // OPERATOR OVERRIDE: allow the engine to size orders using a known-good
     // cash figure when the LIVE key is rate-throttled or fetch-layer rot
