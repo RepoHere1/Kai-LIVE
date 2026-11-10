@@ -12,10 +12,11 @@ $Cfg = @{ Tag = 'LIVE'; Port = 8788 }
 # differ ONLY in the blue channel, and an aging panel's blue is the first to
 # fade - so shadow WINs were printing like LOSSES (white). Windows consoles
 # since Win10 do 24-bit ANSI color once VirtualTerminalProcessing is flipped
-# on; WIN paints RGB(255,128,0): full red, half green, ZERO blue - impossible
-# to wash into white. Run samples.ps1 to re-pick a shade.
+# on; WIN paints RGB(255,185,0) - full red, high green, ZERO blue: cannot wash
+# into white on the aging panel (operator pick G from samples.ps1, 2026-11-10).
+# Run samples.ps1 to re-pick a shade.
 $script:VtOk = $false
-$script:WinOrange = '255;128;0'
+$script:WinOrange = '255;185;0'   # operator pick 2026-11-10: G #FFB900 (bright, leans yellow)
 try {
   if (-not ('Win.KaiVT' -as [type])) {
     Add-Type -Namespace Win -Name KaiVT -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int h); [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out int m); [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, int m);'

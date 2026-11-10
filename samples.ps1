@@ -3,7 +3,7 @@
 # so shadow WINs are switching to TRUE ORANGE - zero blue, cannot wash out.
 # Run this in the SAME console you run tape.ps1 in, pick a letter, then set
 # $script:WinOrange (near the top of tape.ps1) to that 'R;G;B' string.
-# Shipped default: C.
+# Operator pick 2026-11-10: G = 255;185;0 (#FFB900) - shipped in tape.ps1.
 $ErrorActionPreference = 'SilentlyContinue'
 $vt = $false
 try {
@@ -21,7 +21,8 @@ if ($vt) {
   $cands = @(
     @{ L = 'A'; rgb = '255;165;0'; name = 'web orange' },
     @{ L = 'B'; rgb = '255;140;0'; name = 'darkorange1' },
-    @{ L = 'C'; rgb = '255;128;0'; name = 'half-green orange (SHIPPED DEFAULT)' },
+    @{ L = 'C'; rgb = '255;128;0'; name = 'half-green orange' },
+    @{ L = 'G'; rgb = '255;185;0'; name = 'bright, leans yellow (OPERATOR PICK)' },
     @{ L = 'D'; rgb = '255;106;0'; name = 'darkorange' },
     @{ L = 'E'; rgb = '255;85;0';  name = 'deep orange (survives heavy washout)' },
     @{ L = 'F'; rgb = '255;64;0';  name = 'orange-red edge' }
@@ -34,7 +35,7 @@ if ($vt) {
   Write-Host $sample -ForegroundColor Yellow
   Write-Host 'L  LOSS (unchanged, white)                    ' -NoNewline -ForegroundColor Gray
   Write-Host 'SHADOW LOSS KXETHD-26NOV1017-T2099.99 NO @0.49 pnl=-0.49' -ForegroundColor White
-  Write-Host 'Shipped default = C. To change: edit $WinOrange near the top of tape.ps1.' -ForegroundColor Cyan
+  Write-Host 'Operator pick = G (255;185;0 #FFB900). To change: edit $WinOrange near the top of tape.ps1.' -ForegroundColor Cyan
 } else {
   Write-Host 'This console refused 24-bit ANSI color (works in Windows Terminal / Win10+ console).' -ForegroundColor Red
   Write-Host 'Tape fallback in use - DarkYellow (olive-gold, dim but never white-like):' -ForegroundColor Gray
