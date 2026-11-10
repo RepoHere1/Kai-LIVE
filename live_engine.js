@@ -126,10 +126,12 @@ function create(deps) {
       // pool rebuilds, and attempt 2 succeeds (~1.7s measured). The old 20s
       // race killed the WHOLE ladder after one dead socket: every read
       // 'timed out', the backoff grew to 30min, and the cash ledger never
-      // anchored (balance tile '-'). 75s covers the full internal ladder.
+      // anchored (balance tile '-'). 75s covered 4x15s on paper but the real
+      // failure path (abort + refreshAgent().close() draining dead sockets
+      // per attempt) blew past it on boot 161 - 110s = ladder + pool-rebuild slack.
       const b = await Promise.race([
         kalshi.raw('live', 'GET', '/portfolio/balance', { noRetry429: true }),
-        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('balance read timed out after 75s')), 75000); if (t.unref) t.unref(); }),
+        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('balance read timed out after 110s')), 110000); if (t.unref) t.unref(); }),
       ]);
       const dollars = num(b.balance_dollars);
       const cents = num(b.balance);
