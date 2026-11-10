@@ -157,9 +157,10 @@ function create(deps) {
       reason: (scope === 'pooled' ? 'pooled family: ' : '') + v.reason,
     };
     // MEDICAL INTERVENTION (2026-11-10, operator commission): a refuted lane
-    // is diagnosed - if its own record replays positive under a corrected
-    // entry bar it returns on probation (1 contract, that bar); if not, it
-    // goes to hospice with the reason on the record. See rehab.js.
+    // is retrofitted - an ENTRY DNA (edge bar + price band) mined from its own
+    // closed trades puts it back on 1-contract probation; no +EV DNA, a death
+    // spiral, or a refuted cohort halts it (0 contracts) until re-diagnosis.
+    // No hospice - a halt is treatment, not murder. See rehab.js.
     if (base.verdict === 'refuted' && rehab) {
       const o = rehab.evaluate(laneName, 'refuted');
       if (o) return Object.assign({}, o, { lane: laneName, rehab: true });

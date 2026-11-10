@@ -1036,10 +1036,11 @@ CALIB.init().catch((e) => { console.error('[calibration] boot failed:', e.messag
 // from outcomes only - closed live trades for mid-book lanes, the certainty
 // ledger for the certainty lane, the vaccine backtest as corroboration. No
 // config assertion can unlock a refuted lane. See alpha_gate.js.
-// REHAB (2026-11-10, operator commission): medical intervention for refuted
-// lanes - diagnose (what KIND of bad), treat with a corrected entry bar when
-// the lane's own record replays positive under one, return on 1-contract
-// probation, hospice when incurable. Second strike on probation is permanent.
+// REHAB v2 (2026-11-10, operator commission): DNA-revamp for refuted lanes -
+// retrofit a measured ENTRY DNA (edge bar + price band) mined from the lane's
+// own closed trades, return on 1-contract probation, halt at once on a death
+// spiral or refuted cohort. No hospice: a halted lane re-diagnoses as its
+// record grows, capped at 5 generations.
 state.runtime = state.runtime || {};
 if (!state.runtime.rehab) state.runtime.rehab = {};
 const REHAB = require('./rehab').create({
@@ -3035,7 +3036,7 @@ if (p === '/api/calibration') {
    return json(res, ALPHA.report());
  }
   // MEDICAL INTERVENTION, VISIBLE: what the rehab unit is doing to each
-  // refuted lane (diagnosis, treatment bar, probation cohort, hospice).
+  // refuted lane (generation, entry DNA, probation cohort, halt reason).
   if (p === '/api/rehab') return json(res, REHAB.report());
   if (p === '/api/ops/seed-cash' && method === 'POST') {
     // OPERATOR OVERRIDE: allow the engine to size orders using a known-good

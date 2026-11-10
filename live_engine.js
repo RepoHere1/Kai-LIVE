@@ -692,12 +692,16 @@ function pendingExposure() {
       if (av && av.max_qty != null) {
         opts = Object.assign({}, opts, { maxQty: Math.min((opts && opts.maxQty) || av.max_qty, av.max_qty) });
       }
-      // REHAB BAR (2026-11-10): a lane on probation trades only above its
-      // corrected entry bar - the treatment IS the higher bar.
-      if (av && av.min_edge != null) {
-        if (edge == null || edge < av.min_edge) {
-          ls.skips++; ls.last_skip = 'rehab bar: edge ' + (edge != null ? Number(edge).toFixed(3) : '?') + ' < ' + av.min_edge;
-          log('rehab_bar_refused', { lane: lane.name, ticker: q.ticker, edge: edge, bar: av.min_edge });
+      // REHAB DNA (2026-11-10): a lane on probation trades only inside its
+      // measured DNA - edge bar AND price band. The treatment IS the DNA.
+      if (av && av.dna) {
+        const d = av.dna;
+        const p = Number(price);
+        const edgeOk = edge != null && Number(edge) >= d.edge_bar;
+        const priceOk = Number.isFinite(p) && p >= d.price_min && p <= d.price_max;
+        if (!edgeOk || !priceOk) {
+          ls.skips++; ls.last_skip = 'rehab DNA: edge ' + (edge != null ? Number(edge).toFixed(3) : '?') + ' price ' + (Number.isFinite(p) ? p.toFixed(2) : '?') + ' outside edge>=' + d.edge_bar + ' price[' + d.price_min + ',' + d.price_max + ']';
+          log('rehab_bar_refused', { lane: lane.name, ticker: q.ticker, edge: edge, price: p, dna: d });
           return null;
         }
       }
