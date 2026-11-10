@@ -31,7 +31,15 @@ $ServerJs = Join-Path $C.Dir 'server.js'
 # Mirror fits in 256 (settles ~290MB commit). The watchdog restarts BOTH books
 # through THIS file, so a single hardcoded cap rearms LIVE's OOM bomb on every
 # watchdog restart.
-$HeapCap = 4096  # 2026-11-07: match start-*.ps1 launchers (LIVE OOMed at the 2GB default cap; the old per-box 640/256 measurements would re-arm the OOM bomb on this hardware)
+$HeapCaps = @{ mirror = 1536; live = 1024 }
+# ^ 2026-11-10 right-sizing (was: uniform $HeapCap = 4096 from 11-07, which
+# matched start-*.ps1 after LIVE OOMed at the 2GB default cap - the old per-box
+# 640/256 measurements would have re-armed that OOM bomb). The 4096-per-server
+# ceiling armed the OPPOSITE bomb: on the 7.9GB box the 14:36 commit famine
+# (explorer 4.2GB + chrome 2.5GB + cline 2.3GB) froze BOTH books (mirror
+# loop_lag 74.7s, LIVE 6.9s; Resource-Exhaustion events 14:36:45/14:37:54).
+# Peaks on record: mirror 93MB heap post-calibration-backfill, LIVE 36MB now /
+# 370MB spike 11-04. mirror 1536 / live 1024 = >=2.7x headroom, 2.5GB combined.
 $Node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) { $Node = 'C:\Program Files\nodejs\node.exe' }
 
@@ -264,7 +272,7 @@ function Do-Start {
   # HIDDEN launch: a visible console window flashing on every watchdog restart
   # is what the operator saw as "blank PowerShell windows". The server is a
   # background service - it must never own a console.
-  $proc = Start-Process -FilePath $Node -ArgumentList ('--max-old-space-size=' + $HeapCap),'server.js' -WorkingDirectory $C.Dir `
+  $proc = Start-Process -FilePath $Node -ArgumentList ('--max-old-space-size=' + $HeapCaps[$Srv]),'server.js' -WorkingDirectory $C.Dir `
     -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $C.Dir 'server.log') `
     -RedirectStandardError  (Join-Path $C.Dir 'server.err')
