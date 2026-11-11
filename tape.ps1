@@ -8,28 +8,10 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'   # kills the blue "Reading web response" popup
 $Cfg = @{ Tag = 'LIVE'; Port = 8788 }
 
-# TRUE ORANGE FOR SHADOW WINS (operator order 2026-11-10): Yellow and White
-# differ ONLY in the blue channel, and an aging panel's blue is the first to
-# fade - so shadow WINs were printing like LOSSES (white). Windows consoles
-# since Win10 do 24-bit ANSI color once VirtualTerminalProcessing is flipped
-# on; WIN paints RGB(255,185,0) - full red, high green, ZERO blue: cannot wash
-# into white on the aging panel (operator pick G from samples.ps1, 2026-11-10).
-# Run samples.ps1 to re-pick a shade.
-$script:VtOk = $false
-$script:WinOrange = '255;185;0'   # operator pick 2026-11-10: G #FFB900 (bright, leans yellow)
-try {
-  if (-not ('Win.KaiVT' -as [type])) {
-    Add-Type -Namespace Win -Name KaiVT -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int h); [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out int m); [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, int m);'
-  }
-  $kh = [Win.KaiVT]::GetStdHandle(-11)
-  $km = 0
-  if ([Win.KaiVT]::GetConsoleMode($kh, [ref]$km)) { $script:VtOk = [Win.KaiVT]::SetConsoleMode($kh, ($km -bor 4)) }
-} catch { $script:VtOk = $false }
-$esc = [char]27
-function OrangeText([string]$text) {
-  # Bold bright orange via ANSI SGR; the reset restores color after the line.
-  return $esc + '[1m' + $esc + '[38;2;' + $script:WinOrange + 'm' + $text + $esc + '[0m'
-}
+# WIN COLOR LAW (operator order 2026-11-11): every WIN on this tape - book
+# CLOSE, LANE CLOSE, SHADOW settle - prints GREEN, no exceptions. (This
+# retires the 2026-11-10 true-color orange #FFB900 experiment for shadow WINs;
+# samples.ps1 stays in the repo if a custom shade is ever wanted again.)
 
 Write-Host "==== KAI TAPE - LIVE book (trades & shadows live + hourly status, Ctrl+C to stop) ====" -ForegroundColor White
 
@@ -220,21 +202,17 @@ while ($true) {
         if ($e.kind -eq 'SHADOW_OPEN') {
           Line 'DarkMagenta' ("SHADOW OPEN {0} {1} @{2} claimed={3} adj={4} [{5}]" -f $e.market_id, $e.side, $e.price, $e.claimed, $e.adjusted, $e.strategy)
         } else {
-          # OPERATOR SPEC (2026-11-07, color revised 2026-11-10): a settled
-          # shadow keeps its full text, but the color IS the verdict - WIN
-          # prints BRIGHT ORANGE (true color, zero blue: cannot wash into white
-          # on the aging panel), LOSS prints white. A settle with no
-          # outcome/pnl is a sweep - real labels, never blanks.
+          # OPERATOR SPEC (2026-11-07; color law 2026-11-11): a settled shadow
+          # keeps its full text, but the color IS the verdict - WIN prints
+          # GREEN, exactly like every other win of every kind on this tape
+          # (book CLOSE, LANE CLOSE); LOSS prints white. (Supersedes the
+          # 2026-11-10 true-color orange #FFB900 pick for shadow WINs.) A
+          # settle with no outcome/pnl is a sweep - real labels, never blanks.
           $outTxt = if ($e.outcome) { $e.outcome } else { 'SWEPT' }
           $pnlTxt = if ($null -ne $e.pnl) { $e.pnl } else { 'n/a' }
           $shadowTxt = "SHADOW {0} {1} {2} @{3} pnl={4} [{5}]" -f $outTxt, $e.market_id, $e.side, $e.price, $pnlTxt, $e.strategy
-          if ($e.outcome -eq 'WIN') {
-            # True-color orange when the console allows ANSI; olive-gold
-            # DarkYellow otherwise (dim, but never white-like).
-            if ($script:VtOk) { Line 'DarkYellow' (OrangeText $shadowTxt) } else { Line 'DarkYellow' $shadowTxt }
-          } else {
-            Line 'White' $shadowTxt
-          }
+          $scol = if ($e.outcome -eq 'WIN') { 'Green' } else { 'White' }
+          Line $scol $shadowTxt
         }
       }
     }
