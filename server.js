@@ -756,6 +756,19 @@ const STATE_FILE = path.join(HERE, 'state.json');
 const STATE_BACKUP_FILE = path.join(HERE, 'state.backup.json');
 const STATE_TMP_FILE = path.join(HERE, 'state.json.tmp');
 const CONFIG_FILE = path.join(HERE, 'config.json');
+// BOOT SWEEP (2026-11-11): atomic state writes rename state.json.tmp.<pid> ->
+// state.json; a crash mid-write leaves tmp corpses behind (8 in this repo on
+// 2026-11-11, oldest from 2026-11-10). A live writer's tmp exists for
+// milliseconds, so at boot anything >60s old is a corpse by definition.
+try {
+  for (const f of fs.readdirSync(HERE)) {
+    if (!f.startsWith('state.json.tmp.')) continue;
+    const corpse = path.join(HERE, f);
+    try {
+      if (Date.now() - fs.statSync(corpse).mtimeMs > 60_000) fs.unlinkSync(corpse);
+    } catch (e) { /* racing writer or already gone - nothing to do */ }
+  }
+} catch (e) { /* a failed readdir must never block boot */ }
 let STATE_SOURCE = 'primary';
 let STATE_LOAD_ERROR = null;
 const DRY_PAPER_STARTING_BALANCE = 10000; // Paper trading starting balance
