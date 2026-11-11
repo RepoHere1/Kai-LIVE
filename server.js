@@ -1072,6 +1072,11 @@ const LO = require('./live_engine').create({
   // ALPHA + FEED gates (2026-11-06): see alpha_gate.js and the comments in
   // openEntry. spotAgeMs handles both ms and second timestamps defensively.
   alphaGate: (name) => ALPHA.verdict(name),
+  // SHADOW THE REFUSALS (operator order 2026-11-10 "spank"): live_engine's
+  // alpha/rehab refusals become free evidence. The wrapper computes a full
+  // CALIB gate when the caller has none, so every shadow row carries its
+  // adjusted probability (a gate-less row would lose its DB persistence).
+  shadowOpen: (o) => { try { const oo = (o && o.gate) ? o : Object.assign({}, o, { gate: CALIB.gate({ ticker: o.ticker, side: o.side, strategy: o.strategy, claimed: o.claimed, price: o.price, minEdge: 0.05 }) }); return CALIB.shadowOpen(oo); } catch (e) { return false; } },
   spotAgeMs: (asset) => {
     const s = spot[asset];
     if (!s) return null;
@@ -4086,6 +4091,29 @@ async function runAllNoEngine() {
     // posting real orders (stale-HYPE audit, 2026-11-02).
     const hls = laneState('all_no_markets');
     if (hls) { hls.heartbeat = new Date().toISOString(); hls.last_tick = hls.heartbeat; }
+    // SHADOW-ONLY SCAN (operator order 2026-11-10 "spank"): the all_no lane
+    // has been stopped by operator law since 11-08, and runAllNoLive returns
+    // at once when it is - which starved this book's richest shadow source to
+    // zero (tape: 2 shadow opens in 40 minutes, 3 pending for hours). While
+    // the lane is stopped, the scan still runs and every row a RUNNING lane
+    // would have entered becomes a free shadow. ZERO orders, ZERO postings,
+    // ZERO ls.running writes - the operator's button stays absolute law;
+    // only the evidence ledger keeps working.
+    if (!(hls && hls.running)) {
+      try {
+        const rows = await noBook();
+        let shadowed = 0;
+        for (const r of rows) {
+          const ok = CALIB.shadowOpen({ ticker: r.market_id, side: r.side || 'NO', strategy: 'all_no_markets',
+            claimed: r.fair, price: r.limit_entry,
+            sigma: r.sigma != null ? r.sigma : null, tau: r.tau != null ? r.tau : null,
+            strike: r.strike != null ? r.strike : null, spot: (r.spot_product && spot[r.spot_product] && spot[r.spot_product].price) || null,
+            gate: CALIB.gate({ ticker: r.market_id, side: r.side || 'NO', strategy: 'all_no_markets', claimed: r.fair, price: r.limit_entry, minEdge: 0.05 }) });
+          if (ok) shadowed++;
+        }
+        if (shadowed > 0) log('shadow_only_scan', { lane: 'all_no_markets', candidates: rows.length, shadowed });
+      } catch (e) { }
+    }
     await runAllNoLive(); await runAllNoBrainPass(); await runCertaintyPass(); return;
   }
   if (!state.no_lanes_enabled) return;

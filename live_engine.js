@@ -37,7 +37,7 @@ const isoNow = () => new Date().toISOString();
 const isCancelled = (s) => /cancel/i.test(String(s || ''));
 
 function create(deps) {
-  const { getState, kalshi, stream, log, save, broadcast, laneState, bookExit, persistPosition, alphaGate, spotAgeMs } = deps;
+  const { getState, kalshi, stream, log, save, broadcast, laneState, bookExit, persistPosition, alphaGate, spotAgeMs, shadowOpen } = deps;
   const st = () => getState();
   const orders = () => {
     const s = st();
@@ -687,6 +687,11 @@ function pendingExposure() {
       if (av && av.allowed === false) {
         ls.skips++; ls.last_skip = 'alpha gate: ' + av.verdict + ' - ' + av.reason;
         log('alpha_gate_refused', { lane: lane.name, ticker: q.ticker, verdict: av.verdict, reason: av.reason });
+        // SHADOW THE REFUSAL (operator order 2026-11-10 "spank"): a refused
+        // entry is FREE evidence - the shadow grid keeps learning while the
+        // gate holds the line. Without this, a refuted lane goes silent and
+        // can never re-earn its right to trade.
+        if (shadowOpen) shadowOpen({ ticker: q.ticker, side: side || 'NO', strategy: lane && lane.name, claimed: fair, price: price });
         return null;
       }
       if (av && av.max_qty != null) {
@@ -702,6 +707,9 @@ function pendingExposure() {
         if (!edgeOk || !priceOk) {
           ls.skips++; ls.last_skip = 'rehab DNA: edge ' + (edge != null ? Number(edge).toFixed(3) : '?') + ' price ' + (Number.isFinite(p) ? p.toFixed(2) : '?') + ' outside edge>=' + d.edge_bar + ' price[' + d.price_min + ',' + d.price_max + ']';
           log('rehab_bar_refused', { lane: lane.name, ticker: q.ticker, edge: edge, price: p, dna: d });
+          // SHADOW THE DNA REFUSAL (operator order 2026-11-10): out-of-DNA
+          // candidates are the evidence the NEXT DNA generation mines.
+          if (shadowOpen) shadowOpen({ ticker: q.ticker, side: side || 'NO', strategy: lane && lane.name, claimed: fair, price: p });
           return null;
         }
       }
