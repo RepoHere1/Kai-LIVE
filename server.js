@@ -3269,6 +3269,44 @@ if (p === '/api/calibration') {
       cents_per_contract: Number((100 * c.pnl / c.n).toFixed(2)),
     })).sort((a, b) => b.cents_per_contract - a.cents_per_contract);
     const hours = rank(byHour), strats = rank(byStrat), bands = rank(byBand), sides = rank(bySide);
+    // ARM GATE (2026-11-13, twin of Mirror): objective re-arm criteria for the
+    // all_no lane from its own shadow ledger (operator rule: never arm on a
+    // heater). READY needs: (1) sample >= 14 days or >= 5000 graded rows;
+    // (2) pnl positive EXCLUDING the best single day (regime bias); (3) both
+    // money bands (0.50-0.60, 0.60-0.70) each n>=20 with realized >= claimed.
+    let armGate = null;
+    try {
+      const armRows = await dbAll(`SELECT ts, claimed_fair, entry_price, outcome, pnl FROM calibration WHERE strategy='all_no_markets' AND source='shadow' AND outcome IN (0,1) ORDER BY ts`);
+      const byDay = new Map(); let pnlAll = 0, nAll = 0;
+      const band = (lo, hi) => {
+        const rs = armRows.filter(r => { const px = Number(r.entry_price); return px >= lo && px < hi; });
+        const bn = rs.length, wins = rs.reduce((a, r) => a + Number(r.outcome), 0);
+        const claimed = bn ? rs.reduce((a, r) => a + Number(r.claimed_fair || 0), 0) / bn : null;
+        const realized = bn ? wins / bn : null;
+        const ok = bn >= 20 && realized != null && claimed != null && realized >= claimed;
+        return { n: bn, claimed: claimed != null ? Number(claimed.toFixed(3)) : null, realized: realized != null ? Number(realized.toFixed(3)) : null, pnl: Number(rs.reduce((a, r) => a + (Number(r.pnl) || 0), 0).toFixed(2)), ok };
+      };
+      for (const r of armRows) {
+        nAll++; pnlAll += Number(r.pnl) || 0;
+        const d = String(r.ts).slice(0, 10);
+        byDay.set(d, (byDay.get(d) || 0) + (Number(r.pnl) || 0));
+      }
+      const days = armRows.length ? (Date.parse(armRows[armRows.length - 1].ts) - Date.parse(armRows[0].ts)) / 86400000 : 0;
+      let bestDay = null, bestPnl = -Infinity;
+      for (const [d, v] of byDay) if (v > bestPnl) { bestPnl = v; bestDay = d; }
+      const pnlExBest = nAll ? pnlAll - (bestPnl > 0 ? bestPnl : 0) : 0;
+      const b1 = band(0.50, 0.60), b2 = band(0.60, 0.70);
+      const blockers = [];
+      if (!(days >= 14 || nAll >= 5000)) blockers.push(`sample: ${days.toFixed(1)}d / ${nAll} rows (need >=14d or >=5000)`);
+      if (!(pnlExBest > 0)) blockers.push(`pnl ex-best-day ${pnlExBest.toFixed(2)} (regime-biased)`);
+      if (!b1.ok) blockers.push(`band 0.50-0.60: n=${b1.n} claimed=${b1.claimed} realized=${b1.realized} (need n>=20, realized>=claimed)`);
+      if (!b2.ok) blockers.push(`band 0.60-0.70: n=${b2.n} claimed=${b2.claimed} realized=${b2.realized} (need n>=20, realized>=claimed)`);
+      armGate = { strategy: 'all_no_markets', graded: nAll, days_span: Number(days.toFixed(1)), pnl: Number(pnlAll.toFixed(2)),
+        best_day: bestDay, best_day_pnl: bestPnl > -Infinity ? Number(bestPnl.toFixed(2)) : null,
+        pnl_ex_best_day: Number(pnlExBest.toFixed(2)), bands: { '0.50-0.60': b1, '0.60-0.70': b2 },
+        verdict: blockers.length ? 'HOLD' : 'READY', blockers,
+        fences_armed: { entry_floor: 0.50, window_concurrency_cap: 3 } };
+    } catch (e) { armGate = { error: String(e.message || e) }; }
     return json(res, {
       settled_rows: tot.n, shadow_rows: shadowN, live_rows: liveN,
       total_pnl: Number(tot.pnl.toFixed(2)),
@@ -3279,6 +3317,7 @@ if (p === '/api/calibration') {
         strategies: strats.filter(c => c.n >= 20).length,
         bands: bands.filter(c => c.n >= 20).length,
       },
+      arm_gate: armGate,
       pending_shadows: (CALIB.snapshot() || {}).pending_shadows_n || 0,
       note: 'cells with n>=20 are evidence-grade; cents_per_contract = expectancy; outcome=-1 (abandoned) excluded',
     });
@@ -4153,6 +4192,16 @@ async function runAllNoEngine() {
     // verdict is missing or stale-blocked never enters.
     if (!r.calib || r.calib.ok !== true) continue;
     if (marketEntries(r.market_id) >= MAX_MARKET_ENTRIES) continue;
+    // ENTRY FLOOR + WINDOW CAP (2026-11-13 twins of the live-path fences; see
+    // runAllNoLive). Mirror shadow ledger: sub-0.50 band bled -11.24; barrier
+    // ladders inside one window die together.
+    const pfFloor = Math.max(0.50, Number.isFinite(Number(state.runtime.all_no.entry_floor)) ? Number(state.runtime.all_no.entry_floor) : 0.50);
+    if (r.limit_entry < pfFloor) continue;
+    const pfKey = noAssetWindow(r.market_id);
+    if (pfKey) {
+      const pfCap = Number(state.runtime.all_no.window_concurrency_cap) > 0 ? Number(state.runtime.all_no.window_concurrency_cap) : 3;
+      if (book.positions.reduce((a, p) => a + (noAssetWindow(p.market_id) === pfKey ? 1 : 0), 0) >= pfCap) continue;
+    }
     
     // Use pre-calculated values from noBook
     const entry = r.limit_entry; // maker at bid
@@ -4182,6 +4231,16 @@ function hourBlockedUtc() {
   const th = (state.runtime && state.runtime.trading_hours) || {};
   const arr = Array.isArray(th.blocked_utc) ? th.blocked_utc.map(Number).filter(Number.isFinite) : [21, 23];
   return arr.includes(new Date().getUTCHours()) ? arr : null;
+}
+
+// ASSET+WINDOW KEY for the all-no correlation cap (2026-11-13, Mirror twin):
+// KXBTCD-26NOV1222-T70799.99 -> "BTC|26NOV1222". Barrier ladders inside one
+// window die together (worst Mirror shadow cluster: 8/8 lost, -4.37 in one
+// KXBTCD hour) - the exact key the cluster analysis grouped by.
+function noAssetWindow(marketId) {
+  const m = /^KX(BTC|ETH|XRP|HYPE|SOL|DOGE)(?:D|15M|1H|4H)?-([0-9]{2}[A-Z]{3}[0-9]+)/i.exec(String(marketId || ''));
+  if (!m) return null;
+  return m[1].toUpperCase() + '|' + m[2].toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -4234,11 +4293,40 @@ function shadowFastSettle() {
         continue;
       }
     }
-    if (now > closeTs + 2 * 60 * 60 * 1000) {
+    // BACKLOG-HOLE FIX (2026-11-13, Mirror twin): zombies were swept ungraded
+    // whenever the Coinbase feed had no print within 90s of close - while
+    // Kalshi's own finalize held the definitive answer one quote away (tape:
+    // "SHADOW SWEPT pnl=n/a"). The sweep now asks Kalshi for the real result
+    // FIRST; only rows even Kalshi never finalized get the -1 sentinel.
+    // Strike-less rows (never spot-settleable at all) get the Kalshi rescue
+    // at +10min instead of 2h.
+    const strikeKnown = product && row.strike != null && Number.isFinite(Number(row.strike));
+    const rescueAt = strikeKnown ? closeTs + 2 * 60 * 60 * 1000 : closeTs + 10 * 60 * 1000;
+    if (now > rescueAt) zombieRescue(row, closeTs);
+  }
+}
+const ZOMBIE_RESCUE_BUSY = new Set();
+async function zombieRescue(row, closeTs) {
+  if (ZOMBIE_RESCUE_BUSY.has(row.market_id)) return;
+  ZOMBIE_RESCUE_BUSY.add(row.market_id);
+  try {
+    let settled = false;
+    try {
+      const q = await quoteForTicker(row.market_id);
+      if (q && (q.result === 'yes' || q.result === 'no')) {
+        const resultYes = q.result === 'yes';
+        const n = CALIB.settleResult(row.market_id, resultYes, 'kalshi');
+        if (n > 0) {
+          log('shadow_kalshi_settled', { market_id: row.market_id, result: q.result, rescued_after_min: Math.round((Date.now() - closeTs) / 60000) });
+          settled = true;
+        }
+      }
+    } catch (e) { }
+    if (!settled) {
       const n = CALIB.abandon ? CALIB.abandon(row.market_id) : 0;
       if (n > 0) log('shadow_zombie_swept', { market_id: row.market_id, closed_at: new Date(closeTs).toISOString() });
     }
-  }
+  } finally { ZOMBIE_RESCUE_BUSY.delete(row.market_id); }
 }
 setInterval(() => { try { shadowFastSettle(); } catch (e) { } }, 30000);
 
@@ -4291,6 +4379,30 @@ async function runAllNoLive() {
     // + HYPE stopped out in the same round twice). LIVE: ONE position per round.
     const sameRound = state.live.positions.filter(p => p.qty > 0 && p.strategy === 'all_no_markets' && p.close_time && r.expiration && Math.abs(new Date(p.close_time).getTime() - new Date(r.expiration).getTime()) < 1000).length;
     if (sameRound >= 1) continue;
+    // ENTRY FLOOR LAW (2026-11-13, Mirror shadow-ledger evidence - 1,408
+    // graded rows): sub-0.50 entries bled -11.24 (0.40-0.50 band alone -10.36,
+    // claimed 0.559 vs realized 0.403). Hard floor; config may raise, never
+    // lower. NOTE: default max_no_price 0.32 < floor means this lane stays
+    // unbookable until the operator consciously raises the cap to [0.50, ..] -
+    // that is the fence working, not a bug.
+    const entryFloor = Math.max(0.50, Number.isFinite(Number(cfg.entry_floor)) ? Number(cfg.entry_floor) : 0.50);
+    if (r.limit_entry < entryFloor) {
+      noLsX.skips++; noLsX.last_skip = 'entry floor ' + entryFloor.toFixed(2) + ': sub-floor band is -EV (shadow ledger)';
+      continue;
+    }
+    // WINDOW CORRELATION CAP (2026-11-13, Mirror twin): at most this many
+    // OPEN+RESTING rows share one asset+window - a BTC dump must not take a
+    // whole barrier ladder of REAL positions off the book at once.
+    const awKey = noAssetWindow(r.market_id);
+    if (awKey) {
+      const wCap = Number(cfg.window_concurrency_cap) > 0 ? Number(cfg.window_concurrency_cap) : 3;
+      const inWindow = state.live.positions.filter(p => p.qty > 0 && noAssetWindow(p.market_id) === awKey).length
+        + (state.live.orders || []).filter(o => o.kind === 'entry' && (o.status === 'resting' || o.status === 'cancelling') && noAssetWindow(o.market_id || o.ticker) === awKey).length;
+      if (inWindow >= wCap) {
+        noLsX.skips++; noLsX.last_skip = 'window cap ' + wCap + ': ' + awKey;
+        continue;
+      }
+    }
     if (press.level > 1) {
       log('conviction_press', { market_id: r.market_id, level: press.level, n: press.n, win_rate: Number((press.winRate || 0).toFixed(3)) });
     }
@@ -4308,6 +4420,12 @@ async function runAllNoLive() {
     const liveBid = r.side === 'YES' ? q.yes_bid : q.no_bid;
     if (liveBid == null || liveBid > sideCap) continue;
     const entryPx = liveBid;
+    // ENTRY FLOOR, authoritative at the money moment: the live bid can drift
+    // below the floor after the scan passed - the price we PAY is what counts.
+    if (entryPx < entryFloor) {
+      noLsX.skips++; noLsX.last_skip = 'entry floor at live bid ' + entryPx + ' < ' + entryFloor.toFixed(2);
+      continue;
+    }
     // THE VACCINE, re-run AT THE LIVE BID (2026-11-04): the scan's gate used
     // the scan bid; the real fill happens at liveBid, which can be 10c+ worse
     // (0.47/0.53 fills happened). The gate verdict must cover the price we
