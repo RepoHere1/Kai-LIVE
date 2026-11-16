@@ -46,6 +46,10 @@ Removal or change of either requires the operator's express written order.
 ```powershell
 # canonical control
 powershell -File ops/kctl.ps1 live restart
+# root operator handle (process control via kctl + lane on/off; kai.ps1 is a
+# shortcut that forwards to kai-live.ps1)
+.\kai-live.ps1              # status: server + all lanes
+.\kai-live.ps1 on | off     # all lanes on/off (or one: .\kai-live.ps1 on btc_updown)
 # dashboard
 http://127.0.0.1:8788/
 # live tape (DETECTIVE line included)

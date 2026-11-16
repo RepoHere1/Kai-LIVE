@@ -787,8 +787,8 @@ function defaultState() {
     // 2026-11-04 EVIDENCE ZONE (operator order, promoted from Mirror): n=1983
     // closed trades - every entry <0.50 was net positive (+$132), every entry
     // >=0.50 net negative (-$72). Best zone 0.30-0.49 (+$67.26 on n=635).
-    max_price: 0.50,
-    min_price: 0.30,
+    max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+    min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
     take_profit: null,   // DEAD (operator order, 2026-11-03): winners ride to settlement
     stop_loss: 0, // OPERATOR LAW 2026-11-07: DEAD config. Fee exits are forbidden (OPERATOR_LAW.assertNoFeeExit guards the only exit chokepoint); nothing may read this to fire an exit.
     // TRAIL STOP EXTERMINATED (operator law): trail exits sold 86.7%-
@@ -840,8 +840,8 @@ maker_only: true
       min_edge: 0.002,
       min_confidence: 0.25,
       entry_cooldown_sec: 45,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.35,
       preferred_signals: ['order_flow', 'vol_rp', 'black_scholes', 'imbalance'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -855,8 +855,8 @@ maker_only: true
       min_edge: 0.0025,
       min_confidence: 0.25,
       entry_cooldown_sec: 60,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.3,
       preferred_signals: ['order_flow', 'funding_carry', 'black_scholes', 'imbalance'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -870,8 +870,8 @@ maker_only: true
       min_edge: 0.003,
       min_confidence: 0.3,
       entry_cooldown_sec: 90,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.25,
       preferred_signals: ['vol_rp', 'term_struct', 'black_scholes', 'imbalance'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -885,8 +885,8 @@ maker_only: true
       min_edge: 0.0015,
       min_confidence: 0.2,
       entry_cooldown_sec: 300,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.4,
       preferred_signals: ['settlement_alpha', 'term_struct', 'black_scholes', 'cross_expiry'],
       regime_avoid: ['arbitrage'],
@@ -899,8 +899,8 @@ maker_only: true
       min_edge: 0.002,
       min_confidence: 0.25,
       entry_cooldown_sec: 300,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.35,
       preferred_signals: ['settlement_alpha', 'funding_carry', 'term_struct', 'black_scholes'],
       regime_avoid: ['arbitrage'],
@@ -913,8 +913,8 @@ maker_only: true
       min_edge: 0.0025,
       min_confidence: 0.3,
       entry_cooldown_sec: 300,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.3,
       preferred_signals: ['settlement_alpha', 'vol_rp', 'term_struct'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -928,8 +928,8 @@ maker_only: true
       min_edge: 0.0035,
       min_confidence: 0.35,
       entry_cooldown_sec: 120,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.2,
       preferred_signals: ['order_flow', 'vol_rp', 'imbalance', 'black_scholes'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -942,8 +942,8 @@ maker_only: true
       min_edge: 0.003,
       min_confidence: 0.3,
       entry_cooldown_sec: 180,
-      max_price: 0.50,
-      min_price: 0.30,
+      max_price: 0.72, // 2026-11-15 EVIDENCE FLIP: 0.60-0.72 admitted (0.6-0.7: 80.3% wr +0.194/ct); 0.4-0.6 convicted
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.25,
       preferred_signals: ['term_struct', 'vol_rp', 'black_scholes'],
       regime_avoid: ['wide_spread', 'arbitrage'],
@@ -957,7 +957,7 @@ maker_only: true
       min_confidence: 0.4,
       entry_cooldown_sec: 15,
       max_price: 0.49,
-      min_price: 0.30,
+      min_price: 0.60, // 2026-11-15 EVIDENCE FLIP
       kelly_cap: 0.25,
       preferred_signals: ['black_scholes', 'vol_rp', 'term_struct'],
       regime_avoid: ['wide_spread'],
@@ -2957,6 +2957,8 @@ async function handle(req, res) {
       balance_source: LO.balanceSource ? LO.balanceSource() : null,
       balance_age_ms: LO.cashAgeMs ? LO.cashAgeMs() : null,
       balance_error: LO.cashError ? LO.cashError() : null,
+      // 429 CIRCUIT BREAKER (2026-11-15): live view of every rate scope
+      rate_breaker: (kalshi.RATE_BREAKER && kalshi.RATE_BREAKER.snapshot) ? kalshi.RATE_BREAKER.snapshot() : {},
       // CASH LEDGER (storm kill): what the engine believes cash is, how it
       // knows (anchor source/age + applied money events), and when the next
       // REST validation may fire. All memory - zero network.
@@ -4166,7 +4168,14 @@ async function runAllNoEngine() {
         if (shadowed > 0) log('shadow_only_scan', { lane: 'all_no_markets', candidates: rows.length, shadowed });
       } catch (e) { }
     }
-    await runAllNoLive(); await runAllNoBrainPass(); await runCertaintyPass(); return;
+    // 2026-11-15 (429 forever-fix): this used to be one serial await chain
+    // (runAllNoLive -> runAllNoBrainPass -> runCertaintyPass), so a slow or
+    // failing runAllNoLive - a 429 wedge inside its reads - starved certainty
+    // of every tick (the 04:17Z frozen-heartbeat incident). Independent lanes
+    // get independent fates: allSettled runs them concurrently and one
+    // member's failure never blocks the others' evidence collection.
+    await Promise.allSettled([runAllNoLive(), runAllNoBrainPass(), runCertaintyPass()]);
+    return;
   }
   if (!state.no_lanes_enabled) return;
   const noLs = laneState('all_no_markets');
@@ -4736,7 +4745,12 @@ async function boot() {
   setInterval(() => {
     if (allNoPassInFlight) return;
     allNoPassInFlight = true;
-    Promise.resolve(runAllNoEngine()).catch(() => { }).finally(() => { allNoPassInFlight = false; });
+    // 90s PASS DEADLINE (2026-11-15, same guard as the engine tick at heart of
+    // the stale-HYPE fix): a pass whose await hangs forever can never pin this
+    // in-flight flag and freeze the whole scanner family again.
+    Promise.race([runAllNoEngine(), new Promise(r => setTimeout(r, 90000))])
+      .catch(() => { })
+      .finally(() => { allNoPassInFlight = false; });
   }, ALL_NO_SCAN_MS);
   setInterval(runAllNoExits, 5000);
 

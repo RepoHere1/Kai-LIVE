@@ -162,6 +162,56 @@ function buildUrl(acct, route, query) {
   return { url: acct.base + route + qs, fullPath };
 }
 
+// ---------------------------------------------------------------------------
+// 429 CIRCUIT BREAKER (2026-11-15, the forever-fix). Kalshi throttles per API
+// key (signed routes) and per IP (public reads). The old in-loop 429 handler
+// slept up to 4x5s WHILE HOLDING A THROTTLE SLOT, so a handful of throttled
+// calls wedged the entire request pipeline (the 04:17Z certainty-starvation
+// incident) and the blind retries re-ignited the very storm they were fleeing.
+// THE LAW NOW: the FIRST 429 opens a per-scope breaker with an escalating,
+// jittered cooloff. While open, every caller fails fast with the same error -
+// no network touch, no throttle slot - and the negative caches absorb them.
+// One probe after the cooloff half-opens the scope; success resets it. A
+// storm can therefore cost at most one probe per cooloff window, forever.
+// ---------------------------------------------------------------------------
+const RATE_BREAKER = {
+  BASE_MS: 10 * 1000,          // first cooloff: 10s
+  MAX_MS: 5 * 60 * 1000,       // ceiling: 5 min (external-raid safety)
+  scopes: {},                  // scope -> { until, cooloff, trips }
+  scopeFor(acctName, method, route) {
+    const acct = accounts[acctName] || {};
+    const isPublicRead = method === 'GET' && /^(\/markets|\/series|\/events|\/calendar|\/exchange|\/tags)/.test(route);
+    // signed routes share the KEY's budget; public reads share the IP's (per base).
+    return isPublicRead ? 'public@' + String(acct.base || acctName) : 'key@' + String(acct.keyId || acctName);
+  },
+  open(scope, retryAfterMs) {
+    const s = this.scopes[scope] || (this.scopes[scope] = { until: 0, cooloff: 0, trips: 0 });
+    const hint = Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? Math.min(retryAfterMs, this.MAX_MS) : 0;
+    s.cooloff = Math.max(hint, s.cooloff > 0 ? Math.min(s.cooloff * 2, this.MAX_MS) : this.BASE_MS);
+    s.trips++;
+    s.until = Date.now() + Math.round(s.cooloff * (0.9 + Math.random() * 0.2)); // jitter: no synchronized probes
+    try { console.warn('[rate-breaker] OPEN ' + scope + ' for ' + Math.round(s.cooloff / 1000) + 's (trip ' + s.trips + ')'); } catch (e) { }
+    return s;
+  },
+  isOpen(scope) {
+    const s = this.scopes[scope];
+    return (s && Date.now() < s.until) ? s : null;
+  },
+  noteSuccess(scope) {
+    const s = this.scopes[scope];
+    if (s && s.trips > 0) { try { console.warn('[rate-breaker] closed ' + scope + ' after ' + s.trips + ' trip(s)'); } catch (e) { } }
+    // A success proves the scope healthy: clear the window too, or a success
+    // racing a concurrent trip leaves a stale 'open' (seen live 2026-11-15).
+    if (s) { s.cooloff = 0; s.trips = 0; s.until = 0; }
+  },
+  snapshot() { // observability for health endpoints / probes
+    const now = Date.now();
+    const out = {};
+    for (const k of Object.keys(this.scopes)) out[k] = { open: now < this.scopes[k].until, ms_left: Math.max(0, this.scopes[k].until - now), trips: this.scopes[k].trips, cooloff_ms: this.scopes[k].cooloff };
+    return out;
+  },
+};
+
 // Request signing: RSA-PSS (SHA-256) over timestamp + METHOD + path, where the path
 // EXCLUDES the query string. Verified live: GET /portfolio/balance returns 200 with the
 // query stripped from the signed path, and 401 INCORRECT_API_KEY_SIGNATURE when it was included.
@@ -177,6 +227,15 @@ async function raw(acctName, method, route, opts) {
   const url = acct.base + route + qs;
   const pathNoQuery = '/trade-api/v2' + route;
   let lastErr = null;
+  // 429 CIRCUIT BREAKER: fail fast while this scope's cooloff runs - no network
+  // touch, no throttle slot held. Callers' negative caches absorb the error.
+  const bScope = RATE_BREAKER.scopeFor(acctName, method, route);
+  const openB = RATE_BREAKER.isOpen(bScope);
+  if (openB) {
+    const e = new Error('429 breaker open (' + bScope + '): cooloff ' + Math.ceil((openB.until - Date.now()) / 1000) + 's left (trips ' + openB.trips + ')');
+    e.status = 429; e.breaker = true;
+    throw e;
+  }
   for (let attempt = 0; attempt < 4; attempt++) {
     const ts = Math.floor(Date.now() / 1000).toString();
     // 2026-11-04: Kalshi market data (/markets, /series, /events...) is PUBLIC -
@@ -217,13 +276,20 @@ async function raw(acctName, method, route, opts) {
     const text = await r.text();
     let parsed = null;
     try { parsed = text ? JSON.parse(text) : null; } catch (e) { parsed = { raw: text }; }
-    if (r.ok) return parsed;
+    if (r.ok) { RATE_BREAKER.noteSuccess(bScope); return parsed; }
     lastErr = new Error('HTTP ' + r.status + ' ' + method + ' ' + pathNoQuery + qs + ' :: ' + text.slice(0, 300));
     lastErr.status = r.status;
-    if (r.status === 429 && !opts.noRetry429) {
-      const retryAfter = Math.min(5000, (parseInt(r.headers.get('retry-after') || '2', 10) || 2) * 1000);
-      await new Promise(resolve => setTimeout(resolve, retryAfter));
-      continue;
+    // 429 CIRCUIT BREAKER (2026-11-15): NO in-loop retry, ever. The old
+    // sleep-and-retry (up to 4x5s) ran while HOLDING A THROTTLE SLOT - three
+    // throttled calls wedged the whole pipeline (the 04:17Z certainty
+    // starvation) and blind retries re-ignited the storm. Trip the breaker and
+    // let its cooloff pace the next attempt for EVERY caller at once.
+    if (r.status === 429) {
+      const raHdr = parseInt(r.headers.get('retry-after') || '', 10);
+      const raBody = (parsed && parsed.retry_after != null) ? parseInt(parsed.retry_after, 10) : NaN;
+      const raMs = Math.max(0, ((Number.isFinite(raHdr) && raHdr > 0 ? raHdr : (Number.isFinite(raBody) ? raBody : 0)) * 1000));
+      RATE_BREAKER.open(bScope, raMs);
+      break;
     }
     break;
   }
@@ -424,4 +490,4 @@ async function markets(series, limit) {
   return get('/markets', { query: { limit: limit || 5, status: 'open', series_ticker: series }, ttlMs: 1500 });
 }
 
-module.exports = { loadEnv, ENV, ENV_SOURCES, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards, refreshAgent, agentActive: () => !!kalshiAgent };
+module.exports = { loadEnv, ENV, ENV_SOURCES, accounts, sign, raw, get, post, LIVE_BASE, DEMO_BASE, cache, markets, getCacheStats, clearCache, warmCache, placeOrderV2, cancelOrderV2, getOrder, transferBetweenShards, refreshAgent, agentActive: () => !!kalshiAgent, RATE_BREAKER };
